@@ -1,0 +1,17 @@
+[package]
+name = "the-os"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[lib]
+name = "kernel"
+path = "src/kernel/kernel.rs"
+crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
