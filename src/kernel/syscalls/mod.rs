@@ -1,4 +1,7 @@
-use crate::msr::{rdmsr, wrmsr};
+use crate::{
+    msr::{rdmsr, wrmsr},
+    serial,
+};
 
 unsafe extern "C" {
     fn syscall_entry();
@@ -19,5 +22,16 @@ pub unsafe fn init() {
 
         // sfmask
         wrmsr(0xC0000084u32, 1u64 << 9);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn syscall_handler(nr: u64) -> u64 {
+    match nr {
+        0 => {
+            serial::write_str("Syscall 0!\n");
+            return 0;
+        }
+        _ => u64::MAX,
     }
 }

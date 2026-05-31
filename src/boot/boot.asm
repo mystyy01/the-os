@@ -1,5 +1,6 @@
 extern kernel_main
 extern exception_handler
+extern syscall_handler
 
 section .multiboot2
 header_start:
@@ -149,10 +150,44 @@ section .text
     mov gs:[8], rsp
     mov rsp, gs:[0]
 
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14 
+    push r15
+
+    mov rdi, rax
+
+    call syscall_handler
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8 
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+
     mov rsp, gs:[8]
     swapgs
     o64 sysret
-
   exception_common:
     push rax
     push rbx
