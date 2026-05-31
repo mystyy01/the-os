@@ -43,6 +43,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
                 if !curr_task.stack.is_null() {
                     pmm::free_pages(0, curr_task.stack as u64);
                 }
+                core::arch::asm!("swapgs");
                 scheduler::kill_current_task();
             }
             return 0;
