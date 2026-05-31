@@ -1,4 +1,4 @@
-use crate::pmm::alloc_pages;
+use crate::pmm::{alloc_pages, free_pages};
 
 unsafe fn get_or_create(table: *mut u64, idx: u64) -> *mut u64 {
     let entry = table.add(idx as usize);
@@ -43,6 +43,54 @@ pub unsafe fn map_page(pml4: *mut u64, virt: u64, phys: u64, flags: u64) {
         let pd = get_or_create(pdpt, pdpt_idx);
         let pt = get_or_create(pd, pd_idx);
         *pt.add(pt_idx as usize) = phys | flags;
+    }
+}
+
+pub unsafe fn unmap_page(pml4: *mut u64, virt: u64) {
+    let pml4_idx = (virt >> 39) & 0x1FF;
+    let pdpt_idx = (virt >> 30) & 0x1FF;
+    let pd_idx = (virt >> 21) & 0x1FF;
+    let pt_idx = (virt >> 12) & 0x1FF;
+
+    unsafe {
+        let mut entry = *pml4.add(pml4_idx as usize);
+        if entry & 1 == 0 {
+            return;
+        }
+        let pdpt = (entry & !0xFFF) as *mut u64;
+        entry = *pdpt.add(pdpt_idx as usize);
+        if entry & 1 == 0 {
+            return;
+        }
+        let pd = (entry & !0xFFF) as *mut u64;
+        entry = *pd.add(pd_idx as usize);
+        if entry & 1 == 0 {
+            return;
+        }
+        let pt = (entry & !0xFFF) as *mut u64;
+        *pt.add(pt_idx as usize) = 0;
+        core::arch::asm!("invlpg [{}]", in(reg) virt, options(nostack));
+    }
+}
+
+pub unsafe fn free_table(table: *mut u64, depth: u8) {
+    unsafe {
+        for i in 0..512 {
+            if depth == 4 && i == 0 {
+                continue;
+            }
+            let entry = table.add(i);
+            if *entry & 1 == 0 {
+                continue;
+            }
+            if depth == 1 {
+                free_pages(0, (*entry & !0xFFF) as u64);
+            } else {
+                let next_table = (*entry & !0xFFF) as *mut u64;
+                free_table(next_table, depth - 1);
+            }
+        }
+        free_pages(0, table as u64);
     }
 }
 

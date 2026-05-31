@@ -165,7 +165,9 @@ section .text
     push r13
     push r14 
     push r15
-
+  
+    mov rsi, rdi
+    mov rcx, r10
     mov rdi, rax
 
     call syscall_handler

@@ -1,3 +1,5 @@
+use crate::cpu::set_current_task;
+
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq)]
 enum TaskState {
@@ -7,36 +9,36 @@ enum TaskState {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-struct Registers {
-    rsp: u64,
-    r15: u64,
-    r14: u64,
-    r13: u64,
-    r12: u64,
-    r11: u64,
-    r10: u64,
-    r9: u64,
-    r8: u64,
-    rbp: u64,
-    rdi: u64,
-    rsi: u64,
-    rdx: u64,
-    rcx: u64,
-    rbx: u64,
-    rax: u64,
-    rip: u64,
-    rflags: u64,
-    cs: u64,
-    ss: u64,
-    cr3: u64,
+pub struct Registers {
+    pub rsp: u64,
+    pub r15: u64,
+    pub r14: u64,
+    pub r13: u64,
+    pub r12: u64,
+    pub r11: u64,
+    pub r10: u64,
+    pub r9: u64,
+    pub r8: u64,
+    pub rbp: u64,
+    pub rdi: u64,
+    pub rsi: u64,
+    pub rdx: u64,
+    pub rcx: u64,
+    pub rbx: u64,
+    pub rax: u64,
+    pub rip: u64,
+    pub rflags: u64,
+    pub cs: u64,
+    pub ss: u64,
+    pub cr3: u64,
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Task {
-    regs: Registers,
-    priority: u8,
-    state: TaskState,
-    stack: *mut u8,
+    pub regs: Registers,
+    pub priority: u8,
+    pub state: TaskState,
+    pub stack: *mut u8,
 }
 
 pub const MAX_TASKS_PER_PRIORITY: usize = 16;
@@ -151,6 +153,58 @@ pub unsafe fn start() {
                 {
                     let ptr = SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task;
                     SCHEDULER.current = Some(ptr);
+                    set_current_task(Some(ptr));
+
+                    core::arch::asm!("mov cr3, {}", in(reg) (*ptr).regs.cr3, options(nostack));
+                    core::arch::asm!(
+                        "push {ss}",
+                        "push {rsp}",
+                        "push {rflags}",
+                        "push {cs}",
+                        "push {rip}",
+                        "iretq",
+                        ss = in(reg) (*ptr).regs.ss,
+                        rsp = in(reg) (*ptr).regs.rsp,
+                        rflags = in(reg) (*ptr).regs.rflags,
+                        cs = in(reg) (*ptr).regs.cs,
+                        rip = in(reg) (*ptr).regs.rip,
+                        options(noreturn),
+                    );
+                }
+            }
+        }
+        return;
+    }
+}
+
+pub unsafe fn kill_current_task() {
+    unsafe {
+        for priority in (0..PRIORITY_LEVELS).rev() {
+            for i in 0..MAX_TASKS_PER_PRIORITY {
+                let slot = (SCHEDULER.current_slot[priority] + i) % MAX_TASKS_PER_PRIORITY;
+                if SCHEDULER.queues[priority][slot].is_some()
+                    && SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task
+                        == SCHEDULER.current.unwrap()
+                {
+                    SCHEDULER.queues[priority][slot] = None;
+                    break;
+                }
+            }
+        }
+
+        SCHEDULER.current = None;
+        set_current_task(None);
+
+        for priority in (0..PRIORITY_LEVELS).rev() {
+            for i in 0..MAX_TASKS_PER_PRIORITY {
+                let slot = (SCHEDULER.current_slot[priority] + i) % MAX_TASKS_PER_PRIORITY;
+                if SCHEDULER.queues[priority][slot].is_some()
+                    && SCHEDULER.queues[priority][slot].as_ref().unwrap().state == TaskState::Ready
+                {
+                    let ptr = SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task;
+                    SCHEDULER.current = Some(ptr);
+                    set_current_task(Some(ptr));
+
                     core::arch::asm!("mov cr3, {}", in(reg) (*ptr).regs.cr3, options(nostack));
                     core::arch::asm!(
                         "push {ss}",
@@ -205,6 +259,7 @@ pub unsafe fn schedule(frame: *mut u64) {
                     let ptr = SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task;
 
                     SCHEDULER.current = Some(ptr);
+                    set_current_task(Some(ptr));
                     SCHEDULER.current_slot[priority] = (slot + 1) % MAX_TASKS_PER_PRIORITY;
                     *frame.add(0) = (*ptr).regs.r15;
                     *frame.add(1) = (*ptr).regs.r14;

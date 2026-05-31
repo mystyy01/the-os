@@ -1,7 +1,12 @@
 use crate::{
+    cpu, elf,
     msr::{rdmsr, wrmsr},
-    serial,
+    pmm, scheduler,
+    serial::{self, write_hex},
+    vmm,
 };
+
+const USER_STACK: u64 = 0x9000000000;
 
 unsafe extern "C" {
     fn syscall_entry();
@@ -26,12 +31,55 @@ pub unsafe fn init() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_handler(nr: u64) -> u64 {
+pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
     match nr {
         0 => {
-            serial::write_str("Syscall 0!\n");
+            // exit
+            unsafe {
+                let curr_task = *(cpu::get_current_task());
+                serial::write_hex(curr_task.regs.cr3);
+                core::arch::asm!("mov cr3, {}", in(reg) cpu::get_kernel_cr3());
+                vmm::free_table(curr_task.regs.cr3 as *mut u64, 4);
+                if !curr_task.stack.is_null() {
+                    pmm::free_pages(0, curr_task.stack as u64);
+                }
+                scheduler::kill_current_task();
+            }
             return 0;
         }
+        1 => {
+            let addr = pmm::alloc_pages(arg1 as usize) as u64;
+            serial::write_hex(addr);
+            return addr;
+        }
+        2 => {
+            write_hex(arg1);
+            write_hex(arg2);
+            pmm::free_pages(arg2 as usize, arg1);
+            return 0;
+        }
+        3 => unsafe {
+            let task = *(cpu::get_current_task());
+            vmm::map_page(task.regs.cr3 as *mut u64, arg1, arg2, arg3);
+            return 0;
+        },
+        4 => unsafe {
+            let task = *(cpu::get_current_task());
+            vmm::unmap_page(task.regs.cr3 as *mut u64, arg1);
+            return 0;
+        },
+        5 => unsafe {
+            let pml4 = vmm::create_address_space();
+            let entry = elf::load(arg1 as *const u8, arg2 as usize, pml4);
+            if entry == None {
+                vmm::free_table(pml4, 4);
+                return u64::MAX;
+            }
+            let stack_phys = pmm::alloc_pages(0) as u64;
+            vmm::map_page(pml4, USER_STACK, stack_phys, 0x07);
+            scheduler::spawn_user_task(entry.unwrap(), USER_STACK + 0x1000, pml4 as u64, 1);
+            return 0;
+        },
         _ => u64::MAX,
     }
 }
