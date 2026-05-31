@@ -72,6 +72,14 @@ extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
         pit::irq0_handler(frame);
         return;
     }
+    if vector == 14 {
+        let cr2: u64;
+        unsafe { core::arch::asm!("mov {}, cr2", out(reg) cr2) };
+        crate::serial::write_str("PAGE FAULT cr2=");
+        crate::serial::write_hex(cr2);
+        crate::serial::write_str("\n");
+        loop {}
+    }
     crate::serial::write_str("EXCEPTION: ");
     crate::serial::write_hex(vector);
     crate::serial::write_str(" error_code=");

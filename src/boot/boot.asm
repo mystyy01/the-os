@@ -16,10 +16,12 @@ header_start:
 header_end:
 
 section .bss
+  global stack_top
   stack_bottom:
     resb 16384
   stack_top:
     
+  global PML4
   align 4096
   PML4:
     resb 4096  
@@ -27,6 +29,26 @@ section .bss
     resb 4096  
   PD:
     resb 4096  
+  align 16
+  global tss
+  tss:
+    dd 0
+    dq 0
+    dq 0 
+    dq 0
+    dq 0
+    dq 0
+    dq 0
+    dq 0
+    dq 0
+    dq 0
+    dq 0
+    dq 0
+    dq 0
+    dw 0
+    dw 104
+  tss_end:
+
 
 %macro isr_no_err 1
 isr_%1:
@@ -120,6 +142,17 @@ section .text
     isr_no_err 32
     
     global context_switch
+
+    global syscall_entry
+  syscall_entry:
+    swapgs
+    mov gs:[8], rsp
+    mov rsp, gs:[0]
+
+    mov rsp, gs:[8]
+    swapgs
+    o64 sysret
+
   exception_common:
     push rax
     push rbx
@@ -191,16 +224,25 @@ section .text
     popfq
     ret
 
+section .data 
+  global gdt_start
+  global gdt_end
+  gdt_start:
+      dq 0
+      dw 0xFFFF, 0x0000
+      db 0x00, 0x9A, 0xAF, 0x00
+      dw 0xFFFF, 0x0000
+      db 0x00, 0x92, 0xAF, 0x00
+      dw 0xFFFF, 0x0000
+      db 0x00, 0xF2, 0xAF, 0x00
+      dw 0xFFFF, 0x0000
+      db 0x00, 0xFA, 0xAF, 0x00
+      dq 0
+      dq 0
+  gdt_end:
 
 
 section .rodata
-  gdt_start:
-    dq 0
-    dw 0xFFFF, 0x0000
-    db 0x00, 0x9A, 0xAF, 0x00
-
-  gdt_end:
-  
   gdt_descriptor:
     dw (gdt_end - gdt_start - 1)
     dd gdt_start
