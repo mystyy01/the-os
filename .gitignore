@@ -2,3 +2,4 @@ target/
 build/
 isodir/
 kernel.iso
+user/dist/

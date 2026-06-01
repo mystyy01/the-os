@@ -99,7 +99,7 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
     // spawn_task(test_task_a, 1);
     // spawn_task(test_task_b, 1);
 
-    let bytes = include_bytes!("../../user/hello/hello.elf");
+    let bytes = include_bytes!("../../user/dist/hello.elf");
 
     unsafe {
         let pml4 = vmm::create_address_space();

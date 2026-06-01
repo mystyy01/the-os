@@ -1,0 +1,8 @@
+[package]
+name = "libsys"
+version = "0.1.0"
+edition = "2024"
+
+# Shared userspace runtime: the syscall ABI wrapper and the panic handler.
+# Every user program depends on this so neither is duplicated.
+[dependencies]

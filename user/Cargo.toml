@@ -1,0 +1,13 @@
+# Userspace workspace. All the-os user programs live here as members and share
+# one toolchain config (.cargo/config.toml) and one linker script (linker.ld).
+# Add a new program: create the crate dir, add it to `members`, add one line to
+# the Makefile's `user` target.
+[workspace]
+resolver = "2"
+members = ["libsys", "hello", "goodbye"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

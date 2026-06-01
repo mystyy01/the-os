@@ -3,13 +3,5 @@ name = "goodbye"
 version = "0.1.0"
 edition = "2024"
 
-# Independent workspace root so this crate is NOT pulled into the kernel build.
-[workspace]
-
 [dependencies]
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
+libsys = { path = "../libsys" }
