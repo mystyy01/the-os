@@ -99,19 +99,3 @@ pub unsafe fn free_table(table: u64, depth: u8) {
         free_pages(0, table);
     }
 }
-
-pub unsafe fn jump_to_userspace(entry: u64, user_stack: u64) {
-    unsafe {
-        core::arch::asm!(
-            "push 0x1b",
-            "push {stack}",
-            "push 0x202",
-            "push 0x23",
-            "push {entry}",
-            "iretq",
-            entry = in(reg) entry,
-            stack = in(reg) user_stack,
-            options(noreturn)
-        );
-    }
-}
