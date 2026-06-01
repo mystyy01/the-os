@@ -1,4 +1,7 @@
+use core::ptr::null_mut;
+
 use crate::cpu::set_current_task;
+use crate::vfs::{CONSOLE, OpenFile};
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq)]
@@ -39,6 +42,7 @@ pub struct Task {
     pub priority: u8,
     pub state: TaskState,
     pub stack: *mut u8,
+    pub fds: [*mut OpenFile; 16],
 }
 
 pub const MAX_TASKS_PER_PRIORITY: usize = 16;
@@ -93,6 +97,7 @@ pub fn spawn_task(entry: fn(), priority: u8) {
             state: TaskState::Ready,
             priority: priority,
             stack: stack,
+            fds: [core::ptr::null_mut(); 16],
         };
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
@@ -128,12 +133,16 @@ pub fn spawn_user_task(entry: u64, stack_top: u64, cr3: u64, priority: u8) {
             ss: 0x1b,
             cr3: cr3,
         };
-        let task = Task {
+        let mut task = Task {
             regs: regs,
             state: TaskState::Ready,
             priority: priority,
             stack: core::ptr::null_mut(),
+            fds: [core::ptr::null_mut(); 16],
         };
+        task.fds[1] = &raw mut CONSOLE;
+        task.fds[2] = &raw mut CONSOLE;
+
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
                 SCHEDULER.queues[priority as usize][i] = Some(task);
