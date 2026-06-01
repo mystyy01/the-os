@@ -26,10 +26,14 @@ section .bss
   align 4096
   PML4:
     resb 4096  
+  align 4096
   PDPT:
     resb 4096  
   PD:
-    resb 4096  
+    resb 4096
+  align 4096
+  HHDM_PDPT:
+    resb 4096
   align 16
   global tss
   tss:
@@ -89,6 +93,26 @@ section .text
       add eax, 0x200000
       add edi, 8
       loop .loop
+
+    mov eax, HHDM_PDPT
+    or eax, 0b11
+    mov dword [PML4 + 256*8], eax
+    mov dword [PML4 + 256*8 + 4], 0
+
+    mov ecx, 512
+    xor esi, esi
+    mov edi, HHDM_PDPT
+    .hhdm_loop:
+      mov eax, esi
+      shl eax, 30
+      or eax, 0x83
+      mov dword [edi], eax
+      mov eax, esi
+      shr eax, 2 
+      mov dword [edi + 4], eax
+      add edi, 8 
+      inc esi 
+      loop .hhdm_loop
 
     mov eax, PML4
     mov cr3, eax

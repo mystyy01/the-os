@@ -87,7 +87,9 @@ pub unsafe fn load(data: *const u8, size: usize, pml4: *mut u64) -> Option<u64> 
                 if phys_page.is_null() {
                     return None;
                 }
-                core::ptr::write_bytes(phys_page, 0, 0x1000);
+                let virt_page = vmm::phys_to_virt(phys_page as u64);
+
+                core::ptr::write_bytes(virt_page as *mut u8, 0, 0x1000);
 
                 let page_start = page_num * 0x1000;
                 let copy_start = page_start.max(delta);
@@ -99,7 +101,7 @@ pub unsafe fn load(data: *const u8, size: usize, pml4: *mut u64) -> Option<u64> 
                     let len = copy_end - copy_start;
                     copy_nonoverlapping(
                         data.add(offset as usize + src_rel as usize),
-                        phys_page.add(dst_off as usize),
+                        (virt_page as *mut u8).add(dst_off as usize),
                         len as usize,
                     );
                 }

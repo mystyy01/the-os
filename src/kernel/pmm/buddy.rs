@@ -1,9 +1,8 @@
 use core::ptr::{null, null_mut};
 
-use alloc::collections::btree_set;
-
 use crate::pmm::MAX_ORDER;
 use crate::pmm::PAGE_SIZE;
+use crate::vmm;
 
 #[repr(C)]
 struct FreeBlock {
@@ -28,7 +27,7 @@ static mut BUDDY: BuddyAllocator = BuddyAllocator {
 
 fn free_page(addr: u64, order: usize) -> () {
     unsafe {
-        let block: *mut FreeBlock = addr as *mut FreeBlock;
+        let block: *mut FreeBlock = vmm::phys_to_virt(addr) as *mut FreeBlock;
         (*block).next = BUDDY.free_lists[order];
         BUDDY.free_lists[order] = block;
         BUDDY.free_memory += PAGE_SIZE << order;
@@ -41,7 +40,7 @@ pub fn alloc_pages(order: usize) -> *mut u8 {
             let free_block = BUDDY.free_lists[order];
             BUDDY.free_lists[order] = (*free_block).next;
             BUDDY.free_memory -= PAGE_SIZE << order;
-            return free_block as *mut u8;
+            return (free_block as u64 - vmm::HHDM_BASE) as *mut u8;
         }
         if order + 1 >= MAX_ORDER {
             return null_mut();
@@ -69,7 +68,7 @@ pub fn free_pages(order: usize, addr: u64) -> () {
             let mut prev: *mut *mut FreeBlock = &mut BUDDY.free_lists[current_order];
             let mut curr = BUDDY.free_lists[current_order];
             while !curr.is_null() {
-                if curr as u64 == buddy_addr {
+                if curr as u64 == vmm::phys_to_virt(buddy_addr) {
                     *prev = (*curr).next;
                     break;
                 }

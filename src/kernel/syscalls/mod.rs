@@ -39,7 +39,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
                 let curr_task = *(cpu::get_current_task());
                 serial::write_hex(curr_task.regs.cr3);
                 core::arch::asm!("mov cr3, {}", in(reg) cpu::get_kernel_cr3());
-                vmm::free_table(curr_task.regs.cr3 as *mut u64, 4);
+                vmm::free_table(curr_task.regs.cr3, 4);
                 if !curr_task.stack.is_null() {
                     pmm::free_pages(0, curr_task.stack as u64);
                 }
@@ -73,7 +73,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
             let pml4 = vmm::create_address_space();
             let entry = elf::load(arg1 as *const u8, arg2 as usize, pml4);
             if entry == None {
-                vmm::free_table(pml4, 4);
+                vmm::free_table(pml4 as u64, 4);
                 return u64::MAX;
             }
             let stack_phys = pmm::alloc_pages(0) as u64;
