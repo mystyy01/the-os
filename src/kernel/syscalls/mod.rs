@@ -1,5 +1,3 @@
-use core::ptr::null_mut;
-
 use crate::{
     cpu, elf,
     msr::{rdmsr, wrmsr},
@@ -78,22 +76,6 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
             vmm::map_page(pml4, USER_STACK, stack_phys, 0x07);
             scheduler::spawn_user_task(entry.unwrap(), USER_STACK + 0x1000, pml4 as u64, 1);
             return 0;
-        },
-        6 => unsafe {
-            let task = cpu::get_current_task();
-            let fd = arg1;
-            let buf = arg2 as *const u8;
-            let len = arg3 as usize;
-            if fd >= 16 {
-                return 1;
-            }
-            let openfile = (*task).fds[fd as usize];
-            if openfile.is_null() {
-                return 1;
-            }
-            let res = ((*(*openfile).ops).write)(openfile, buf, len);
-
-            return res as u64;
         },
         _ => u64::MAX,
     }

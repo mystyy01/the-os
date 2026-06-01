@@ -25,7 +25,6 @@ mod pmm;
 mod scheduler;
 mod serial;
 mod syscalls;
-mod vfs;
 mod vmm;
 
 #[panic_handler]
