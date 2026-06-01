@@ -13,6 +13,6 @@ pub fn init(hz: u32) {
 pub fn irq0_handler(frame: *mut u64) {
     outb(0x20, 0x20);
     unsafe {
-        scheduler::schedule(frame);
+        // scheduler::schedule(frame);
     }
 }

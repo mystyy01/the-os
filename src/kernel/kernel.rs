@@ -2,7 +2,12 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 
-use crate::{heap::KernelHeap, idle::setup_idle, pmm::alloc_pages, scheduler::spawn_task};
+use crate::{
+    heap::KernelHeap,
+    idle::setup_idle,
+    pmm::{PAGE_SIZE, alloc_pages},
+    scheduler::{spawn_task, yield_now},
+};
 
 extern crate alloc;
 
@@ -10,6 +15,9 @@ extern crate alloc;
 fn alloc_error(_: core::alloc::Layout) -> ! {
     loop {}
 }
+
+static mut KSP_A: u64 = 0;
+static mut KSP_B: u64 = 0;
 
 mod cpu;
 mod elf;
@@ -46,14 +54,33 @@ fn write_vga(ptr: *mut u16, s: &str) -> () {
         }
     }
 }
-
+static mut SLEEPER: *mut scheduler::Task = core::ptr::null_mut();
 fn test_task_a() {
-    serial::write_str("Task a!\n");
-    loop {}
+    serial::write_str("A blocking\n");
+    unsafe {
+        SLEEPER = cpu::get_current_task();
+        scheduler::block_current();
+    }
+    serial::write_str("A woke!\n");
+    loop {
+        unsafe {
+            scheduler::yield_now();
+        }
+    }
 }
+
 fn test_task_b() {
-    serial::write_str("Task b!\n");
-    loop {}
+    serial::write_str("B running\n");
+    unsafe {
+        scheduler::wake(Some(SLEEPER));
+        scheduler::yield_now();
+    }
+    loop {
+        serial::write_str("B\n");
+        unsafe {
+            scheduler::yield_now();
+        }
+    }
 }
 
 fn test_user_func() {
@@ -96,29 +123,16 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
     unsafe { core::arch::asm!("sti") }
     serial::write_str("Entering user space\n");
     setup_idle();
-    // spawn_task(test_task_a, 1);
-    // spawn_task(test_task_b, 1);
 
     let bytes = include_bytes!("../../user/dist/hello.elf");
-
     unsafe {
         let pml4 = vmm::create_address_space();
         let entry = elf::load(bytes.as_ptr(), bytes.len(), pml4);
         let phys = pmm::alloc_pages(0);
         let user_stack: u64 = 0x10000000;
         vmm::map_page(pml4, user_stack, phys as u64, 0x07);
-
         scheduler::spawn_user_task(entry.unwrap(), user_stack + 0x1000, pml4 as u64, 1);
     }
-
-    let ptr = 0xb8000 as *mut u16;
-    write_vga(ptr, "hello world!");
-    write_vga(ptr, "making the vector..");
-    use alloc::vec::Vec;
-    let mut v: Vec<u32> = Vec::new();
-    v.push(42);
-    write_vga(ptr, "we have made the vector!");
-    unsafe { core::arch::asm!("sti") }
 
     unsafe {
         scheduler::start();

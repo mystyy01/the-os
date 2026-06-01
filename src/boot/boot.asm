@@ -218,6 +218,34 @@ section .boot.text
     global context_switch
 
     global syscall_entry
+    
+    global switch_to
+
+    global user_entry_bouncy_trampoline_lol
+  switch_to:
+    push rbp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov [rdi], rsp
+    mov rsp, rsi
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret 
+  user_entry_bouncy_trampoline_lol:
+    push 0x1b
+    push r14
+    push 0x202
+    push 0x23
+    push r15
+    iretq
   syscall_entry:
     swapgs
     mov gs:[8], rsp

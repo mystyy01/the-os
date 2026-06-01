@@ -1,4 +1,14 @@
-use crate::cpu::set_current_task;
+use core::ptr::null_mut;
+
+use crate::{
+    cpu::{get_current_task, set_current_task},
+    pmm,
+};
+
+unsafe extern "C" {
+    pub fn switch_to(prev: *mut u64, next: u64);
+    pub fn user_entry_bouncy_trampoline_lol();
+}
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq)]
@@ -9,36 +19,12 @@ enum TaskState {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct Registers {
-    pub rsp: u64,
-    pub r15: u64,
-    pub r14: u64,
-    pub r13: u64,
-    pub r12: u64,
-    pub r11: u64,
-    pub r10: u64,
-    pub r9: u64,
-    pub r8: u64,
-    pub rbp: u64,
-    pub rdi: u64,
-    pub rsi: u64,
-    pub rdx: u64,
-    pub rcx: u64,
-    pub rbx: u64,
-    pub rax: u64,
-    pub rip: u64,
-    pub rflags: u64,
-    pub cs: u64,
-    pub ss: u64,
-    pub cr3: u64,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
 pub struct Task {
-    pub regs: Registers,
     pub priority: u8,
     pub state: TaskState,
     pub stack: *mut u8,
+    pub ksp: u64,
+    pub cr3: u64,
 }
 
 pub const MAX_TASKS_PER_PRIORITY: usize = 16;
@@ -46,7 +32,6 @@ pub const PRIORITY_LEVELS: usize = 8;
 
 struct Scheduler {
     queues: [[Option<Task>; MAX_TASKS_PER_PRIORITY]; PRIORITY_LEVELS],
-    current: Option<*mut Task>,
     current_slot: [usize; PRIORITY_LEVELS],
 }
 
@@ -55,44 +40,85 @@ unsafe impl Sync for Scheduler {}
 
 static mut SCHEDULER: Scheduler = Scheduler {
     queues: [[None; MAX_TASKS_PER_PRIORITY]; PRIORITY_LEVELS],
-    current: None,
     current_slot: [0; PRIORITY_LEVELS],
 };
+unsafe fn find_next_task() -> Option<*mut Task> {
+    unsafe {
+        for priority in (0..PRIORITY_LEVELS).rev() {
+            for i in 0..MAX_TASKS_PER_PRIORITY {
+                let slot = (SCHEDULER.current_slot[priority] + i + 1) % MAX_TASKS_PER_PRIORITY;
+                if SCHEDULER.queues[priority][slot].is_some()
+                    && SCHEDULER.queues[priority][slot].as_ref().unwrap().state == TaskState::Ready
+                {
+                    SCHEDULER.current_slot[priority] = slot;
+                    return Some(SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task);
+                }
+            }
+        }
+        return None;
+    }
+}
+pub fn yield_now() {
+    unsafe {
+        let prev = get_current_task();
+        if let Some(next) = find_next_task() {
+            if next == prev {
+                return;
+            }
+            set_current_task(Some(next));
+
+            core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
+            switch_to(&raw mut (*prev).ksp, (*next).ksp);
+        }
+    }
+}
+
+pub fn block_current() {
+    unsafe {
+        let prev = get_current_task();
+        if let Some(next) = find_next_task() {
+            if next == prev {
+                return;
+            }
+            (*prev).state = TaskState::Blocked;
+            set_current_task(Some(next));
+            core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
+            switch_to(&raw mut (*prev).ksp, (*next).ksp);
+        }
+    }
+}
+
+pub fn wake(task: Option<*mut Task>) {
+    unsafe {
+        if task.is_none() {
+            return;
+        }
+        (*task.unwrap()).state = TaskState::Ready;
+    }
+}
 
 pub fn spawn_task(entry: fn(), priority: u8) {
     let stack = crate::pmm::alloc_pages(2) as *mut u8;
     unsafe {
-        let stack_top = stack.add(4096 * 4);
+        let kstack_phys = pmm::alloc_pages(1) as u64;
+        let top = (crate::vmm::phys_to_virt(kstack_phys) + 8192) as *mut u64;
+        *top.sub(1) = entry as u64; // ret lands here
+        *top.sub(2) = 0;
+        *top.sub(3) = 0;
+        *top.sub(4) = 0;
+        *top.sub(5) = 0;
+        *top.sub(6) = 0;
+        *top.sub(7) = 0;
+        let ksp = top.sub(7) as u64;
+
         let mut cr3: u64;
         core::arch::asm!("mov {}, cr3", out(reg) cr3);
-        let regs = Registers {
-            rsp: stack_top as u64,
-            r15: 0,
-            r14: 0,
-            r13: 0,
-            r12: 0,
-            r11: 0,
-            r10: 0,
-            r9: 0,
-            r8: 0,
-            rbp: 0,
-            rdi: 0,
-            rsi: 0,
-            rdx: 0,
-            rcx: 0,
-            rbx: 0,
-            rax: 0,
-            rip: entry as u64,
-            rflags: 0x202,
-            cs: 0x08,
-            ss: 0x10,
-            cr3: cr3,
-        };
         let task = Task {
-            regs: regs,
             state: TaskState::Ready,
             priority: priority,
             stack: stack,
+            ksp: ksp,
+            cr3: cr3,
         };
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
@@ -103,38 +129,28 @@ pub fn spawn_task(entry: fn(), priority: u8) {
     }
 }
 
-pub fn spawn_user_task(entry: u64, stack_top: u64, cr3: u64, priority: u8) {
+pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8) {
+    let stack = crate::pmm::alloc_pages(2) as *mut u8;
     unsafe {
-        let regs = Registers {
-            rsp: stack_top as u64,
-            r15: 0,
-            r14: 0,
-            r13: 0,
-            r12: 0,
-            r11: 0,
-            r10: 0,
-            r9: 0,
-            r8: 0,
-            rbp: 0,
-            rdi: 0,
-            rsi: 0,
-            rdx: 0,
-            rcx: 0,
-            rbx: 0,
-            rax: 0,
-            rip: entry as u64,
-            rflags: 0x202,
-            cs: 0x23,
-            ss: 0x1b,
-            cr3: cr3,
-        };
+        let kstack_phys = pmm::alloc_pages(1) as u64;
+        let top = (crate::vmm::phys_to_virt(kstack_phys) + 8192) as *mut u64;
+
+        *top.sub(1) = user_entry_bouncy_trampoline_lol as u64;
+        *top.sub(2) = 0;
+        *top.sub(3) = 0;
+        *top.sub(4) = 0;
+        *top.sub(5) = 0;
+        *top.sub(6) = user_stack_top;
+        *top.sub(7) = entry;
+        let ksp = top.sub(7) as u64;
+
         let task = Task {
-            regs: regs,
             state: TaskState::Ready,
             priority: priority,
-            stack: core::ptr::null_mut(),
+            stack: null_mut(),
+            ksp: ksp,
+            cr3: cr3,
         };
-
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
                 SCHEDULER.queues[priority as usize][i] = Some(task);
@@ -147,34 +163,21 @@ pub fn spawn_user_task(entry: u64, stack_top: u64, cr3: u64, priority: u8) {
 pub unsafe fn start() {
     unsafe {
         for priority in (0..PRIORITY_LEVELS).rev() {
-            for i in 0..MAX_TASKS_PER_PRIORITY {
-                let slot = (SCHEDULER.current_slot[priority] + i) % MAX_TASKS_PER_PRIORITY;
+            for slot in 0..MAX_TASKS_PER_PRIORITY {
                 if SCHEDULER.queues[priority][slot].is_some()
                     && SCHEDULER.queues[priority][slot].as_ref().unwrap().state == TaskState::Ready
                 {
-                    let ptr = SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task;
-                    SCHEDULER.current = Some(ptr);
-                    set_current_task(Some(ptr));
+                    let first = SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task;
+                    set_current_task(Some(first));
+                    SCHEDULER.current_slot[priority] = slot;
 
-                    core::arch::asm!("mov cr3, {}", in(reg) (*ptr).regs.cr3, options(nostack));
-                    core::arch::asm!(
-                        "push {ss}",
-                        "push {rsp}",
-                        "push {rflags}",
-                        "push {cs}",
-                        "push {rip}",
-                        "iretq",
-                        ss = in(reg) (*ptr).regs.ss,
-                        rsp = in(reg) (*ptr).regs.rsp,
-                        rflags = in(reg) (*ptr).regs.rflags,
-                        cs = in(reg) (*ptr).regs.cs,
-                        rip = in(reg) (*ptr).regs.rip,
-                        options(noreturn),
-                    );
+                    core::arch::asm!("mov cr3, {}", in(reg) (*first).cr3, options(nostack));
+                    let mut dummy = 0u64;
+                    switch_to(&raw mut dummy, (*first).ksp);
+                    return;
                 }
             }
         }
-        return;
     }
 }
 
@@ -185,7 +188,7 @@ pub unsafe fn kill_current_task() {
                 let slot = (SCHEDULER.current_slot[priority] + i) % MAX_TASKS_PER_PRIORITY;
                 if SCHEDULER.queues[priority][slot].is_some()
                     && SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task
-                        == SCHEDULER.current.unwrap()
+                        == get_current_task()
                 {
                     SCHEDULER.queues[priority][slot] = None;
                     break;
@@ -193,100 +196,11 @@ pub unsafe fn kill_current_task() {
             }
         }
 
-        SCHEDULER.current = None;
-        set_current_task(None);
-
-        for priority in (0..PRIORITY_LEVELS).rev() {
-            for i in 0..MAX_TASKS_PER_PRIORITY {
-                let slot = (SCHEDULER.current_slot[priority] + i) % MAX_TASKS_PER_PRIORITY;
-                if SCHEDULER.queues[priority][slot].is_some()
-                    && SCHEDULER.queues[priority][slot].as_ref().unwrap().state == TaskState::Ready
-                {
-                    let ptr = SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task;
-                    SCHEDULER.current = Some(ptr);
-                    set_current_task(Some(ptr));
-
-                    core::arch::asm!("mov cr3, {}", in(reg) (*ptr).regs.cr3, options(nostack));
-                    core::arch::asm!(
-                        "push {ss}",
-                        "push {rsp}",
-                        "push {rflags}",
-                        "push {cs}",
-                        "push {rip}",
-                        "iretq",
-                        ss = in(reg) (*ptr).regs.ss,
-                        rsp = in(reg) (*ptr).regs.rsp,
-                        rflags = in(reg) (*ptr).regs.rflags,
-                        cs = in(reg) (*ptr).regs.cs,
-                        rip = in(reg) (*ptr).regs.rip,
-                        options(noreturn),
-                    );
-                }
-            }
+        if let Some(next) = find_next_task() {
+            set_current_task(Some(next));
+            core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
+            let mut dummy = 0u64;
+            switch_to(&raw mut dummy, (*next).ksp);
         }
-        return;
-    }
-}
-
-pub unsafe fn schedule(frame: *mut u64) {
-    unsafe {
-        if let Some(save) = SCHEDULER.current {
-            (*save).regs.rip = *frame.add(17);
-            (*save).regs.rsp = *frame.add(20);
-            (*save).regs.rflags = *frame.add(19);
-
-            (*save).regs.rax = *frame.add(14);
-            (*save).regs.rbx = *frame.add(13);
-            (*save).regs.rcx = *frame.add(12);
-            (*save).regs.rdx = *frame.add(11);
-            (*save).regs.rsi = *frame.add(10);
-            (*save).regs.rdi = *frame.add(9);
-            (*save).regs.rbp = *frame.add(8);
-            (*save).regs.r8 = *frame.add(7);
-            (*save).regs.r9 = *frame.add(6);
-            (*save).regs.r10 = *frame.add(5);
-            (*save).regs.r11 = *frame.add(4);
-            (*save).regs.r12 = *frame.add(3);
-            (*save).regs.r13 = *frame.add(2);
-            (*save).regs.r14 = *frame.add(1);
-            (*save).regs.r15 = *frame.add(0);
-        }
-        for priority in (0..PRIORITY_LEVELS).rev() {
-            for i in 0..MAX_TASKS_PER_PRIORITY {
-                let slot = (SCHEDULER.current_slot[priority] + i) % MAX_TASKS_PER_PRIORITY;
-                if SCHEDULER.queues[priority][slot].is_some()
-                    && SCHEDULER.queues[priority][slot].as_ref().unwrap().state == TaskState::Ready
-                {
-                    let ptr = SCHEDULER.queues[priority][slot].as_mut().unwrap() as *mut Task;
-
-                    SCHEDULER.current = Some(ptr);
-                    set_current_task(Some(ptr));
-                    SCHEDULER.current_slot[priority] = (slot + 1) % MAX_TASKS_PER_PRIORITY;
-                    *frame.add(0) = (*ptr).regs.r15;
-                    *frame.add(1) = (*ptr).regs.r14;
-                    *frame.add(2) = (*ptr).regs.r13;
-                    *frame.add(3) = (*ptr).regs.r12;
-                    *frame.add(4) = (*ptr).regs.r11;
-                    *frame.add(5) = (*ptr).regs.r10;
-                    *frame.add(6) = (*ptr).regs.r9;
-                    *frame.add(7) = (*ptr).regs.r8;
-                    *frame.add(8) = (*ptr).regs.rbp;
-                    *frame.add(9) = (*ptr).regs.rdi;
-                    *frame.add(10) = (*ptr).regs.rsi;
-                    *frame.add(11) = (*ptr).regs.rdx;
-                    *frame.add(12) = (*ptr).regs.rcx;
-                    *frame.add(13) = (*ptr).regs.rbx;
-                    *frame.add(14) = (*ptr).regs.rax;
-                    *frame.add(17) = (*ptr).regs.rip;
-                    *frame.add(18) = (*ptr).regs.cs;
-                    *frame.add(19) = (*ptr).regs.rflags;
-                    *frame.add(20) = (*ptr).regs.rsp;
-                    *frame.add(21) = (*ptr).regs.ss;
-                    core::arch::asm!("mov cr3, {}", in(reg) (*ptr).regs.cr3, options(nostack));
-                    return;
-                }
-            }
-        }
-        return;
     }
 }

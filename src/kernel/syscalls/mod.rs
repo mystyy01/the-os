@@ -38,7 +38,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
             unsafe {
                 let curr_task = *(cpu::get_current_task());
                 core::arch::asm!("mov cr3, {}", in(reg) cpu::get_kernel_cr3());
-                vmm::free_table(curr_task.regs.cr3, 4);
+                vmm::free_table(curr_task.cr3, 4);
                 if !curr_task.stack.is_null() {
                     pmm::free_pages(0, curr_task.stack as u64);
                 }
@@ -57,12 +57,12 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
         }
         3 => unsafe {
             let task = *(cpu::get_current_task());
-            vmm::map_page(task.regs.cr3 as *mut u64, arg1, arg2, arg3);
+            vmm::map_page(task.cr3 as *mut u64, arg1, arg2, arg3);
             return 0;
         },
         4 => unsafe {
             let task = *(cpu::get_current_task());
-            vmm::unmap_page(task.regs.cr3 as *mut u64, arg1);
+            vmm::unmap_page(task.cr3 as *mut u64, arg1);
             return 0;
         },
         5 => unsafe {
