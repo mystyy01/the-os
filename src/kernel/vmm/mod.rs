@@ -31,6 +31,7 @@ pub unsafe fn create_address_space() -> *mut u64 {
         *pml4 = *boot_pml4;
 
         *pml4.add(256) = *boot_pml4.add(256);
+        *pml4.add(511) = *boot_pml4.add(511);
 
         return pml4;
     }
@@ -81,7 +82,7 @@ pub unsafe fn free_table(table: u64, depth: u8) {
     unsafe {
         let virt = phys_to_virt(table) as *mut u64;
         for i in 0..512 {
-            if depth == 4 && (i == 0 || i == 256) {
+            if depth == 4 && (i == 0 || i == 256 || i == 511) {
                 continue;
             }
             let entry = *virt.add(i);

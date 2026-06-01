@@ -16,24 +16,47 @@ header_start:
   
 header_end:
 
+section .boot.bss
+  boot_stack_bottom:
+    resb 4096
+  boot_stack_top:
+
+  global PML4
+  align 4096
+  PML4:
+    resb 4096
+  align 4096
+  PDPT:
+    resb 4096
+  PD:
+    resb 4096
+  align 4096
+  HHDM_PDPT:
+    resb 4096
+  align 4096
+  KERNEL_PDPT:
+    resb 4096
+  KERNEL_PD:
+    resb 4096
+
+section .boot.data
+  boot_gdt_start:
+    dq 0
+    dw 0xFFFF, 0x0000
+    db 0x00, 0x9A, 0xAF, 0x00
+    dw 0xFFFF, 0x0000
+    db 0x00, 0x92, 0xAF, 0x00
+  boot_gdt_end:
+  boot_gdt_descriptor: 
+    dw (boot_gdt_end - boot_gdt_start - 1)
+    dd boot_gdt_start
+
 section .bss
   global stack_top
   stack_bottom:
     resb 16384
   stack_top:
     
-  global PML4
-  align 4096
-  PML4:
-    resb 4096  
-  align 4096
-  PDPT:
-    resb 4096  
-  PD:
-    resb 4096
-  align 4096
-  HHDM_PDPT:
-    resb 4096
   align 16
   global tss
   tss:
@@ -66,11 +89,11 @@ isr_%1:
   push %1 
   jmp exception_common
 %endmacro
-section .text
+section .boot.text
   [BITS 32]
   global _start
   _start:
-    mov esp, stack_top
+    mov esp, boot_stack_top
 
     cmp eax, 0x36D76289
     jne hang
@@ -114,6 +137,26 @@ section .text
       inc esi 
       loop .hhdm_loop
 
+    mov eax, KERNEL_PDPT
+    or eax, 0b11
+    mov dword [PML4 + 511*8], eax
+    mov dword [PML4 + 511*8 + 4], 0
+
+    mov eax, KERNEL_PD
+    or eax, 0b11
+    mov dword [KERNEL_PDPT + 510*8], eax
+    mov dword [KERNEL_PDPT + 510*8 + 4], 0
+
+    mov ecx, 512
+    mov eax, 0x83
+    mov edi, KERNEL_PD
+    .khigh_loop:
+      mov dword [edi], eax
+      mov dword [edi + 4], 0
+      add eax, 0x200000
+      add edi, 8
+      loop .khigh_loop
+
     mov eax, PML4
     mov cr3, eax
 
@@ -131,7 +174,7 @@ section .text
     or eax, 1 << 31
     mov cr0, eax
 
-    lgdt [gdt_descriptor]
+    lgdt [boot_gdt_descriptor]
     jmp 0x08:long_mode_start
   hang:
     hlt
@@ -141,10 +184,16 @@ section .text
     mov ax, 0
     mov ds, ax
     mov es, ax
-    mov ss, ax 
-    mov fs, ax 
+    mov ss, ax
+    mov fs, ax
     mov gs, ax
 
+    mov rax, high_start
+    jmp rax
+  section .text
+  [BITS 64]
+  high_start:
+    mov rsp, stack_top
     mov rdi, rbx
     call kernel_main
     
@@ -301,11 +350,5 @@ section .data
       dq 0
       dq 0
   gdt_end:
-
-
-section .rodata
-  gdt_descriptor:
-    dw (gdt_end - gdt_start - 1)
-    dd gdt_start
   
 
