@@ -6,10 +6,6 @@ SECTIONS {
     . = 1M;
     kernel_start = .;
 
-    /* Low-half boot region. Runs in 32-bit before paging is on, so its VMA
-       must equal its physical/load address (identity). Holds the multiboot
-       header, the 32-bit entry + long-mode trampoline, the boot GDT, and the
-       page tables the early code fills by physical address. */
     .boot ALIGN(4K) :
     {
         KEEP(*(.multiboot2))
@@ -22,8 +18,6 @@ SECTIONS {
         *(.boot.bss)
     }
 
-    /* High-half kernel. Linked at KERNEL_VMA + phys (reachable via PML4[511]),
-       but loaded (LMA) at the matching low physical address via AT(). */
     . += KERNEL_VMA;
 
     .text ALIGN(4K) : AT(ADDR(.text) - KERNEL_VMA)

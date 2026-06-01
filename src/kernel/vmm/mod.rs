@@ -24,16 +24,15 @@ unsafe extern "C" {
 
 pub unsafe fn create_address_space() -> *mut u64 {
     unsafe {
-        let pml4 = crate::pmm::alloc_pages(0) as *mut u64;
-        core::ptr::write_bytes(phys_to_virt(pml4 as u64) as *mut u8, 0, 4096);
+        let pml4 = crate::pmm::alloc_pages(0);
+        let pml4_virt = phys_to_virt(pml4 as u64) as *mut u64;
+        core::ptr::write_bytes(pml4_virt as *mut u8, 0, 4096);
 
-        let boot_pml4 = &raw mut PML4 as *mut u64;
-        *pml4 = *boot_pml4;
+        let boot_pml4 = phys_to_virt(&raw const PML4 as u64) as *mut u64;
+        *pml4_virt.add(256) = *boot_pml4.add(256);
+        *pml4_virt.add(511) = *boot_pml4.add(511);
 
-        *pml4.add(256) = *boot_pml4.add(256);
-        *pml4.add(511) = *boot_pml4.add(511);
-
-        return pml4;
+        return pml4 as *mut u64;
     }
 }
 
@@ -44,6 +43,8 @@ pub unsafe fn map_page(pml4: *mut u64, virt: u64, phys: u64, flags: u64) {
     let pt_idx = (virt >> 12) & 0x1FF;
 
     unsafe {
+        let pml4 = phys_to_virt(pml4 as u64) as *mut u64;
+        let mut entry = *pml4.add(pml4_idx as usize);
         let pdpt = get_or_create(pml4, pml4_idx);
         let pd = get_or_create(pdpt, pdpt_idx);
         let pt = get_or_create(pd, pd_idx);

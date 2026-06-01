@@ -105,7 +105,7 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
         let pml4 = vmm::create_address_space();
         let entry = elf::load(bytes.as_ptr(), bytes.len(), pml4);
         let phys = pmm::alloc_pages(0);
-        let user_stack: u64 = 0x9000000000;
+        let user_stack: u64 = 0x10000000;
         vmm::map_page(pml4, user_stack, phys as u64, 0x07);
 
         scheduler::spawn_user_task(entry.unwrap(), user_stack + 0x1000, pml4 as u64, 1);

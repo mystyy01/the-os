@@ -6,7 +6,7 @@ use crate::{
     vmm,
 };
 
-const USER_STACK: u64 = 0x9000000000;
+const USER_STACK: u64 = 0x10000000;
 
 unsafe extern "C" {
     fn syscall_entry();

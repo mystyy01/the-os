@@ -5,15 +5,9 @@ target = "x86_64-unknown-none"
 build-std = ["core", "compiler_builtins"]
 build-std-features = ["compiler-builtins-mem"]
 
-# Static, non-PIE executables laid out at a fixed high virtual address by
-# linker.ld. cargo runs the compiler with cwd = workspace root (this dir), so
-# the relative `-Tlinker.ld` resolves to user/linker.ld.
-#   code-model=large: user programs load at >= 0x8000000000, outside the small
-#   model's +/-2GB window, so all symbol references need 64-bit addressing.
 [target.x86_64-unknown-none]
 rustflags = [
     "-C", "relocation-model=static",
-    "-C", "code-model=large",
     "-C", "link-arg=-no-pie",
     "-C", "link-arg=-Tlinker.ld",
 ]
