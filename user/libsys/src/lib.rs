@@ -6,7 +6,7 @@ fn panic_handler(info: &PanicInfo) -> ! {
     loop {}
 }
 
-pub unsafe fn syscall(syscall_num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
+pub unsafe fn syscall(syscall_num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> u64 {
     let res: u64;
     let rcx: u64;
     let r11: u64;

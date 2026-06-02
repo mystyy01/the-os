@@ -34,7 +34,7 @@ pub unsafe fn init() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
+pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> u64 {
     match nr {
         0 => {
             // exit
