@@ -41,6 +41,12 @@ pub unsafe fn set_stack_top(top: u64) {
     }
 }
 
+pub unsafe fn current_task_opt() -> Option<*mut Task> {
+    unsafe {
+        return CPU_LOCAL.current_task;
+    }
+}
+
 pub unsafe fn get_current_task() -> *mut Task {
     unsafe {
         return CPU_LOCAL.current_task.unwrap();

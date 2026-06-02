@@ -70,37 +70,6 @@ fn test_task_a() {
     }
 }
 
-fn test_task_b() {
-    serial::write_str("B running\n");
-    unsafe {
-        scheduler::wake(Some(SLEEPER));
-        scheduler::yield_now();
-    }
-    loop {
-        serial::write_str("B\n");
-        unsafe {
-            scheduler::yield_now();
-        }
-    }
-}
-
-fn test_user_func() {
-    unsafe {
-        let addr: u64;
-        core::arch::asm!("mov rax, 1", "mov rdi, 0", "syscall", out("rax") addr, options(nostack));
-        core::arch::asm!(
-            "syscall",
-            in("rax") 2u64,
-            in("rdi") addr,
-            in("rdx") 0u64,
-            lateout("rax") _,
-            options(nostack)
-        );
-        core::arch::asm!("mov rax, 0", "syscall", options(nostack));
-    }
-    loop {}
-}
-
 unsafe extern "C" {
     static stack_top: u8;
 }
@@ -124,15 +93,27 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
     unsafe { core::arch::asm!("sti") }
     serial::write_str("Entering user space\n");
     setup_idle();
-
-    let bytes = include_bytes!("../../user/dist/hello.elf");
-    unsafe {
-        let pml4 = vmm::create_address_space();
-        let entry = elf::load(bytes.as_ptr(), bytes.len(), pml4);
-        let phys = pmm::alloc_pages(0);
-        let user_stack: u64 = 0x10000000;
-        vmm::map_page(pml4, user_stack, phys as u64, 0x07);
-        scheduler::spawn_user_task(entry.unwrap(), user_stack + 0x1000, pml4 as u64, 1);
+    {
+        let bytes = include_bytes!("../../user/dist/spina.elf");
+        unsafe {
+            let pml4 = vmm::create_address_space();
+            let entry = elf::load(bytes.as_ptr(), bytes.len(), pml4);
+            let phys = pmm::alloc_pages(0);
+            let user_stack: u64 = 0x10000000;
+            vmm::map_page(pml4, user_stack, phys as u64, 0x07);
+            scheduler::spawn_user_task(entry.unwrap(), user_stack + 0x1000, pml4 as u64, 1);
+        }
+    }
+    {
+        let bytes = include_bytes!("../../user/dist/spinb.elf");
+        unsafe {
+            let pml4 = vmm::create_address_space();
+            let entry = elf::load(bytes.as_ptr(), bytes.len(), pml4);
+            let phys = pmm::alloc_pages(0);
+            let user_stack: u64 = 0x10000000;
+            vmm::map_page(pml4, user_stack, phys as u64, 0x07);
+            scheduler::spawn_user_task(entry.unwrap(), user_stack + 0x1000, pml4 as u64, 1);
+        }
     }
 
     unsafe {

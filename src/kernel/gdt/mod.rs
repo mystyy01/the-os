@@ -37,3 +37,10 @@ pub fn init(kernel_stack_top: u64) {
         core::arch::asm!("ltr ax", in("ax") 0x28u16, options(nostack));
     }
 }
+
+pub fn set_rsp0(top: u64) {
+    unsafe {
+        let rsp0_ptr = (&raw mut tss as *mut u8).add(4) as *mut u64;
+        rsp0_ptr.write_unaligned(top);
+    }
+}

@@ -19,3 +19,17 @@ dependencies = [
 [[package]]
 name = "libsys"
 version = "0.1.0"
+
+[[package]]
+name = "spina"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
+name = "spinb"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]

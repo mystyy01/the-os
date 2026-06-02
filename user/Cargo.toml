@@ -4,7 +4,7 @@
 # the Makefile's `user` target.
 [workspace]
 resolver = "2"
-members = ["libsys", "hello", "goodbye"]
+members = ["libsys", "hello", "goodbye", "spina", "spinb"]
 
 [profile.dev]
 panic = "abort"

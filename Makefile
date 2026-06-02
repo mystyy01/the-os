@@ -41,6 +41,8 @@ $(BUILD_DIR)/boot.o: $(BOOT_ASM)
 user:
 	$(call build_user,goodbye)
 	$(call build_user,hello)
+	$(call build_user,spinb)
+	$(call build_user,spina)
 
 rust: user
 	$(CARGO) build

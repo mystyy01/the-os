@@ -2,6 +2,7 @@ use core::ptr::null_mut;
 
 use crate::{
     cpu::{get_current_task, set_current_task, set_stack_top},
+    gdt,
     ipc::IPCMessage,
     pmm,
 };
@@ -119,6 +120,7 @@ pub fn yield_now() {
 
             core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
             set_stack_top((*next).kstack_top);
+            gdt::set_rsp0((*next).kstack_top);
 
             switch_to(&raw mut (*prev).ksp, (*next).ksp);
         }
@@ -136,6 +138,7 @@ pub fn block_current() {
             set_current_task(Some(next));
             core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
             set_stack_top((*next).kstack_top);
+            gdt::set_rsp0((*next).kstack_top);
 
             switch_to(&raw mut (*prev).ksp, (*next).ksp);
         }
@@ -235,6 +238,8 @@ pub unsafe fn start() {
 
                     core::arch::asm!("mov cr3, {}", in(reg) (*first).cr3, options(nostack));
                     set_stack_top((*first).kstack_top);
+                    gdt::set_rsp0((*first).kstack_top);
+
                     let mut dummy = 0u64;
                     core::arch::asm!("swapgs");
                     switch_to(&raw mut dummy, (*first).ksp);
@@ -264,6 +269,7 @@ pub unsafe fn kill_current_task() {
             set_current_task(Some(next));
             core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
             set_stack_top((*next).kstack_top);
+            gdt::set_rsp0((*next).kstack_top);
 
             let mut dummy = 0u64;
             switch_to(&raw mut dummy, (*next).ksp);

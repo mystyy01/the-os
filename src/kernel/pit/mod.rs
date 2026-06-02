@@ -1,4 +1,4 @@
-use crate::{io::outb, scheduler, serial::write_str};
+use crate::{cpu, io::outb, scheduler, serial::write_str};
 
 pub fn init(hz: u32) {
     let divisor: u32 = 1193182 / hz;
@@ -13,6 +13,9 @@ pub fn init(hz: u32) {
 pub fn irq0_handler(frame: *mut u64) {
     outb(0x20, 0x20);
     unsafe {
-        // scheduler::schedule(frame);
+        if cpu::current_task_opt().is_none() {
+            return;
+        }
     }
+    scheduler::yield_now();
 }

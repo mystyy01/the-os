@@ -294,6 +294,10 @@ section .boot.text
     swapgs
     o64 sysret
   exception_common:
+    test qword [rsp + 24], 3 
+    jz .from_kernel_in
+    swapgs
+  .from_kernel_in:
     push rax
     push rbx
     push rcx
@@ -333,6 +337,10 @@ section .boot.text
     pop rbx
     pop rax
 
+    test qword [rsp + 24], 3
+    jz .from_kernel_out
+    swapgs
+  .from_kernel_out:
     add rsp, 16
     iretq
 
