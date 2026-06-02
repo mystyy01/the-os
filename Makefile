@@ -50,6 +50,7 @@ rust: user
 	$(CARGO) build
 
 $(KERNEL_BIN): $(BOOT_OBJ) rust
+	mkdir -p $(ISO_DIR)/boot
 	$(LD) -n -T $(LINKER_SCRIPT) -o $@ $(BOOT_OBJ) $(RUST_LIB)
 
 $(ISO): $(KERNEL_BIN)

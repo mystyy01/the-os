@@ -1,5 +1,5 @@
 target/
 build/
-isodir/
+isodir/boot/kernel.bin
 kernel.iso
 user/dist/

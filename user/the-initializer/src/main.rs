@@ -7,7 +7,7 @@ use libsys::syscall;
 unsafe extern "C" fn _start() -> ! {
     unsafe {
         let kbd = include_bytes!("../../dist/kb_driver.elf");
-        syscall(5, kbd.as_ptr() as u64, kbd.len() as u64, 0);
+        syscall(5, kbd.as_ptr() as u64, kbd.len() as u64, 0, 0);
 
         loop {}
     }
