@@ -42,6 +42,7 @@ unsafe extern "C" {
     fn isr_13();
     fn isr_14();
     fn isr_32();
+    fn isr_33();
 }
 #[repr(C, packed)]
 struct IDTR {
@@ -56,6 +57,7 @@ pub fn init() {
         IDT[13] = make_entry(isr_13 as *const () as u64);
         IDT[14] = make_entry(isr_14 as *const () as u64);
         IDT[32] = make_entry(isr_32 as *const () as u64);
+        IDT[33] = make_entry(isr_33 as *const () as u64);
 
         let idtr: IDTR = IDTR {
             limit: (256 * 16 - 1) as u16,
@@ -70,6 +72,11 @@ pub fn init() {
 extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
     if vector == 32 {
         pit::irq0_handler(frame);
+        return;
+    }
+    if vector == 33 {
+        crate::io::outb(0x20, 0x20);
+        crate::irq::dispatch(1);
         return;
     }
     if vector == 14 {

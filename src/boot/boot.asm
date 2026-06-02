@@ -59,6 +59,7 @@ section .bss
     
   align 16
   global tss
+  global tss_end
   tss:
     dd 0
     dq 0
@@ -75,6 +76,9 @@ section .bss
     dq 0
     dw 0
     dw 104
+  io_map:
+    times 8192 db 0xFF
+    db 0xFF
   tss_end:
 
 
@@ -214,6 +218,9 @@ section .boot.text
 
     global isr_32
     isr_no_err 32
+
+    global isr_33
+    isr_no_err 33
     
     global context_switch
 

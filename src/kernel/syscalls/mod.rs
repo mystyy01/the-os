@@ -1,6 +1,7 @@
 use crate::{
     cpu, elf,
     ipc::{IPCMessage, read_ipc, write_ipc},
+    irq,
     msr::{rdmsr, wrmsr},
     pmm::{self, PAGE_SIZE},
     scheduler::{self, find_task_by_pid, yield_now},
@@ -124,6 +125,13 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
             // i really shoulda done these comments for the other syscalls cuz i lowk forgot what
             // they do
             yield_now();
+            return 0;
+        }
+        10 => {
+            // register an irq reader
+            // arg1 = irq number
+            let pid = unsafe { (*cpu::get_current_task()).pid };
+            irq::register(arg1 as usize, pid);
             return 0;
         }
         _ => u64::MAX,

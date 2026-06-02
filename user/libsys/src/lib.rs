@@ -22,3 +22,9 @@ pub struct IPCMessage {
     pub data: [u8; 256],
     pub len: usize,
 }
+
+pub unsafe fn inb(port: u16) -> u8 {
+    let v: u8;
+    core::arch::asm!("in al, dx", in("dx") port, out("al") v, options(nostack, nomem));
+    return v;
+}

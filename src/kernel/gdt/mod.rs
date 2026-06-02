@@ -1,5 +1,6 @@
 unsafe extern "C" {
     static mut tss: u8;
+    static tss_end: u8;
     static gdt_start: u8;
     static gdt_end: u8;
 }
@@ -12,7 +13,7 @@ struct GDTR {
 
 pub fn init(kernel_stack_top: u64) {
     let tss_addr = &raw mut tss as u64;
-    let tss_size = 104u64;
+    let tss_size = (&raw const tss_end as u64) - tss_addr;
     unsafe {
         let low = (tss_size & 0xFFFF)
             | ((tss_addr & 0xFFFF) << 16)
@@ -28,6 +29,9 @@ pub fn init(kernel_stack_top: u64) {
 
         let rsp0_ptr = (&raw mut tss as *mut u8).add(4) as *mut u64;
         rsp0_ptr.write_unaligned(kernel_stack_top);
+
+        let iomap_byte = (&raw mut tss as *mut u8).add(104 + 12);
+        *iomap_byte = 0xEE;
 
         let gdtr = GDTR {
             limit: ((&raw const gdt_end as u64) - (&raw const gdt_start as u64) - 1) as u16,

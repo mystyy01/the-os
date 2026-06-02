@@ -3,7 +3,7 @@ use crate::scheduler::spawn_task;
 fn idle() {
     loop {
         unsafe {
-            core::arch::asm!("hlt");
+            core::arch::asm!("sti; hlt");
         }
     }
 }

@@ -10,9 +10,9 @@ const MAX_IPC_MSG_LEN: usize = 256;
 
 #[derive(Clone, Copy)]
 pub struct IPCMessage {
-    sender_pid: i32,
-    data: [u8; MAX_IPC_MSG_LEN],
-    len: usize,
+    pub sender_pid: i32,
+    pub data: [u8; MAX_IPC_MSG_LEN],
+    pub len: usize,
 }
 
 unsafe impl Send for IPCMessage {}
@@ -61,7 +61,8 @@ pub fn read_ipc(task: *mut Task) -> *const IPCMessage {
             // block the task and let the write wake it up i think
             return &(*task).ipc_msg;
         }
-
-        return &(*task).ipc_msg;
+        let msg = &(*task).ipc_msg;
+        (*task).ipc_msg.sender_pid = -1;
+        return msg;
     }
 }
