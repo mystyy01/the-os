@@ -59,7 +59,6 @@ pub fn read_ipc(task: *mut Task) -> *const IPCMessage {
             // we know theres no ipc message being sent
             scheduler::block_current();
             // block the task and let the write wake it up i think
-            return &(*task).ipc_msg;
         }
         let msg = &(*task).ipc_msg;
         (*task).ipc_msg.sender_pid = -1;
