@@ -15,3 +15,10 @@ pub unsafe fn syscall(syscall_num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 
     }
     return res;
 }
+
+#[derive(Clone, Copy)]
+pub struct IPCMessage {
+    pub sender_pid: i32,
+    pub data: [u8; 256],
+    pub len: usize,
+}

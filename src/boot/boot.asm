@@ -245,11 +245,13 @@ section .boot.text
     push 0x202
     push 0x23
     push r15
+    swapgs
     iretq
   syscall_entry:
     swapgs
     mov gs:[8], rsp
     mov rsp, gs:[0]
+    push qword gs:[8]
 
     push rax
     push rbx
@@ -288,7 +290,7 @@ section .boot.text
     pop rcx
     pop rbx
 
-    mov rsp, gs:[8]
+    mov rsp, [rsp + 8]
     swapgs
     o64 sysret
   exception_common:

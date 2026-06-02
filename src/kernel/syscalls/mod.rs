@@ -1,7 +1,9 @@
 use crate::{
     cpu, elf,
+    ipc::{IPCMessage, read_ipc, write_ipc},
     msr::{rdmsr, wrmsr},
-    pmm, scheduler,
+    pmm::{self, PAGE_SIZE},
+    scheduler::{self, find_task_by_pid, yield_now},
     serial::{self, write_hex},
     vmm,
 };
@@ -42,7 +44,6 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
                 if !curr_task.stack.is_null() {
                     pmm::free_pages(0, curr_task.stack as u64);
                 }
-                core::arch::asm!("swapgs");
                 scheduler::kill_current_task();
             }
             return 0;
@@ -77,6 +78,54 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> u
             scheduler::spawn_user_task(entry.unwrap(), USER_STACK + 0x1000, pml4 as u64, 1);
             return 0;
         },
+        6 => {
+            // ipc write
+            // arg1 is the pid target
+            // arg2 is the message
+            // arg3 is the len of the message
+            let task = find_task_by_pid(arg1 as i32);
+            if task.is_null() {
+                return 1;
+            }
+
+            write_ipc(task, arg2 as *const u8, arg3 as i32);
+
+            return 0;
+        }
+        7 => {
+            // ipc read
+            // arg1 is out param
+            unsafe {
+                let task = cpu::get_current_task();
+                if task.is_null() {
+                    return 1;
+                }
+
+                let msg = read_ipc(task);
+
+                let out = arg1 as *mut IPCMessage;
+                *out = *msg;
+
+                return 0;
+            }
+        }
+        8 => {
+            // print for debugging - goes thru serial
+            let bytes = unsafe { core::slice::from_raw_parts(arg1 as *const u8, arg2 as usize) };
+
+            for byte in bytes {
+                serial::write_byte(*byte);
+            }
+
+            return 0;
+        }
+        9 => {
+            // yield
+            // i really shoulda done these comments for the other syscalls cuz i lowk forgot what
+            // they do
+            yield_now();
+            return 0;
+        }
         _ => u64::MAX,
     }
 }

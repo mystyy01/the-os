@@ -26,6 +26,7 @@ mod heap;
 mod idle;
 mod idt;
 mod io;
+mod ipc;
 mod msr;
 mod pic;
 mod pit;

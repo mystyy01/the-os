@@ -1,7 +1,8 @@
 use core::ptr::null_mut;
 
 use crate::{
-    cpu::{get_current_task, set_current_task},
+    cpu::{get_current_task, set_current_task, set_stack_top},
+    ipc::IPCMessage,
     pmm,
 };
 
@@ -12,7 +13,7 @@ unsafe extern "C" {
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq)]
-enum TaskState {
+pub enum TaskState {
     Ready,
     Blocked,
 }
@@ -24,7 +25,11 @@ pub struct Task {
     pub state: TaskState,
     pub stack: *mut u8,
     pub ksp: u64,
+    kstack_top: u64,
     pub cr3: u64,
+    pub pid: i32,
+    pub pid_waiting_ipc: i32,
+    pub ipc_msg: IPCMessage,
 }
 
 pub const MAX_TASKS_PER_PRIORITY: usize = 16;
@@ -42,6 +47,51 @@ static mut SCHEDULER: Scheduler = Scheduler {
     queues: [[None; MAX_TASKS_PER_PRIORITY]; PRIORITY_LEVELS],
     current_slot: [0; PRIORITY_LEVELS],
 };
+
+fn next_pid() -> i32 {
+    let mut best_pid: i32 = 0;
+    unsafe {
+        for priority in 0..PRIORITY_LEVELS {
+            for slot in 0..MAX_TASKS_PER_PRIORITY {
+                if let Some(task) = SCHEDULER.queues[priority][slot].as_mut() {
+                    if task.pid >= best_pid {
+                        best_pid += 1;
+                    }
+                }
+            }
+        }
+    }
+    return best_pid;
+}
+
+pub fn find_task_by_pid(pid: i32) -> *mut Task {
+    unsafe {
+        for priority in 0..PRIORITY_LEVELS {
+            for slot in 0..MAX_TASKS_PER_PRIORITY {
+                if let Some(task) = SCHEDULER.queues[priority][slot].as_mut() {
+                    if task.pid == pid {
+                        return task;
+                    }
+                }
+            }
+        }
+    }
+    return null_mut();
+}
+pub fn find_ipc_waiting(pid: i32) -> *mut Task {
+    unsafe {
+        for priority in 0..PRIORITY_LEVELS {
+            for slot in 0..MAX_TASKS_PER_PRIORITY {
+                if let Some(task) = SCHEDULER.queues[priority][slot].as_mut() {
+                    if task.pid == pid && task.state == TaskState::Blocked {
+                        return task;
+                    }
+                }
+            }
+        }
+    }
+    return null_mut();
+}
 unsafe fn find_next_task() -> Option<*mut Task> {
     unsafe {
         for priority in (0..PRIORITY_LEVELS).rev() {
@@ -68,6 +118,8 @@ pub fn yield_now() {
             set_current_task(Some(next));
 
             core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
+            set_stack_top((*next).kstack_top);
+
             switch_to(&raw mut (*prev).ksp, (*next).ksp);
         }
     }
@@ -83,6 +135,8 @@ pub fn block_current() {
             (*prev).state = TaskState::Blocked;
             set_current_task(Some(next));
             core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
+            set_stack_top((*next).kstack_top);
+
             switch_to(&raw mut (*prev).ksp, (*next).ksp);
         }
     }
@@ -118,7 +172,11 @@ pub fn spawn_task(entry: fn(), priority: u8) {
             priority: priority,
             stack: stack,
             ksp: ksp,
+            kstack_top: top as u64,
             cr3: cr3,
+            pid: next_pid(),
+            ipc_msg: IPCMessage::default(),
+            pid_waiting_ipc: -1,
         };
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
@@ -149,7 +207,11 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8) 
             priority: priority,
             stack: null_mut(),
             ksp: ksp,
+            kstack_top: top as u64,
             cr3: cr3,
+            pid: next_pid(),
+            ipc_msg: IPCMessage::default(),
+            pid_waiting_ipc: -1,
         };
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
@@ -172,7 +234,9 @@ pub unsafe fn start() {
                     SCHEDULER.current_slot[priority] = slot;
 
                     core::arch::asm!("mov cr3, {}", in(reg) (*first).cr3, options(nostack));
+                    set_stack_top((*first).kstack_top);
                     let mut dummy = 0u64;
+                    core::arch::asm!("swapgs");
                     switch_to(&raw mut dummy, (*first).ksp);
                     return;
                 }
@@ -199,6 +263,8 @@ pub unsafe fn kill_current_task() {
         if let Some(next) = find_next_task() {
             set_current_task(Some(next));
             core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
+            set_stack_top((*next).kstack_top);
+
             let mut dummy = 0u64;
             switch_to(&raw mut dummy, (*next).ksp);
         }

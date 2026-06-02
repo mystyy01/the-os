@@ -12,6 +12,10 @@ pub unsafe extern "C" fn _start() -> ! {
 
         syscall(5, goodbye.as_ptr() as u64, goodbye.len() as u64, 0);
 
+        syscall(9, 0, 0, 0);
+
+        syscall(6, 2, "hello".as_ptr() as u64, 5);
+
         syscall(0, 0, 0, 0);
     }
 
