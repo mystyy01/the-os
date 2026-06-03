@@ -24,6 +24,9 @@ struct KBEvent {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() {
+    let init_ipcd = unsafe { syscall(13, 1, 0, 0, 0) };
+    let irq_ipcd = unsafe { syscall(13, 0, 0, 0, 0) };
+
     // register for keyboard shit
     unsafe {
         syscall(10, 1, 0, 0, 0);
@@ -33,10 +36,10 @@ unsafe extern "C" fn _start() {
         len: 0,
     };
     unsafe {
-        syscall(7, &mut msg1 as *mut _ as u64, 0, 0, 0);
+        syscall(7, &mut msg1 as *mut _ as u64, init_ipcd, 0, 0);
     }
     unsafe {
-        syscall(12, "im alive!".as_ptr() as u64, 9, 0, 0);
+        syscall(12, "im alive!".as_ptr() as u64, 9, init_ipcd, 0);
     }
     loop {
         let mut msg = IPCMessage {
@@ -44,7 +47,7 @@ unsafe extern "C" fn _start() {
             len: 0,
         };
         unsafe {
-            syscall(7, &mut msg as *mut _ as u64, 0, 0, 0);
+            syscall(7, &mut msg as *mut _ as u64, irq_ipcd, 0, 0);
         }
         unsafe {
             let sc = inb(0x60);

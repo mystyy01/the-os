@@ -1,13 +1,12 @@
 use crate::{
     cpu::{self, get_current_task},
     elf,
-    ipc::{IPCMessage, IPCState, read_ipc, write_ipc},
+    ipc::{IPCMessage, IPCState, alloc_con, conn_mut, find_conn_to, read_ipc, recv_any, write_ipc},
     irq,
     msr::{rdmsr, wrmsr},
-    pmm::{self, PAGE_SIZE},
-    scheduler::{self, TaskState, find_task_by_pid, yield_now},
-    serial::{self, write_hex},
-    vmm,
+    pmm,
+    scheduler::{self, Task, find_task_by_pid, yield_now},
+    serial, vmm,
 };
 
 const USER_STACK: u64 = 0x10000000;
@@ -31,6 +30,24 @@ pub unsafe fn init() {
 
         // sfmask
         wrmsr(0xC0000084u32, 1u64 << 9);
+    }
+}
+
+unsafe fn route_ipc_peer(me: *mut Task, my_ipcd: i32) -> Option<(*mut Task, i32)> {
+    unsafe {
+        let peer_pid = conn_mut(me, my_ipcd)?.peer_pid;
+        let target = find_task_by_pid(peer_pid);
+        if target.is_null() {
+            return None;
+        }
+        let tgt_ipcd = match find_conn_to(target, (*me).pid) {
+            Some(ipcd) => ipcd,
+            None => alloc_con(target, (*me).pid),
+        };
+        if tgt_ipcd < 0 {
+            return None;
+        }
+        return Some((target, tgt_ipcd));
     }
 }
 
@@ -84,28 +101,37 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
         },
         6 => {
             // ipc write
-            // arg1 is the pid target
+            // arg1 is my ipcd
             // arg2 is the message
             // arg3 is the len of the message
-            let task = find_task_by_pid(arg1 as i32);
-            if task.is_null() {
-                return 1;
+            unsafe {
+                let me = get_current_task();
+                if me.is_null() {
+                    return 1;
+                }
+
+                let Some((target, tgt_ipcd)) = route_ipc_peer(me, arg1 as i32) else {
+                    return 1;
+                };
+
+                return write_ipc(target, tgt_ipcd, arg2 as *const u8, arg3 as i32) as u64;
             }
-
-            write_ipc(task, arg2 as *const u8, arg3 as i32);
-
-            return 0;
         }
         7 => {
             // ipc read
             // arg1 is out param
+            // arg2 is my ipcd
             unsafe {
                 let task = cpu::get_current_task();
                 if task.is_null() {
                     return 1;
                 }
 
-                let msg = read_ipc(task);
+                if conn_mut(task, arg2 as i32).is_none() {
+                    return 1;
+                }
+
+                let msg = read_ipc(task, arg2 as i32);
 
                 let out = arg1 as *mut IPCMessage;
                 *out = *msg;
@@ -139,43 +165,95 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
         }
         11 => unsafe {
             // call - basicalyl ipc write AND then read to wait for tha repsonse
-            // arg1 is the pid target
+            // arg1 is my ipcd
             // arg2 is the message
             // arg3 is the len of the message
             // arg4 is the out param for the message back
 
-            let target = find_task_by_pid(arg1 as i32);
-            if target.is_null() {
+            let me = get_current_task();
+            if me.is_null() {
                 return 1;
             }
-            let me = get_current_task();
+            let ipcd = arg1 as i32;
 
-            (*me).ipc_con.peer_pid = arg1 as i32;
-            (*me).ipc_con.state = IPCState::AwaitingReply;
+            match conn_mut(me, ipcd) {
+                Some(con) => con.state = IPCState::AwaitingReply,
+                None => return 1,
+            }
 
-            write_ipc(target, arg2 as *const u8, arg3 as i32);
+            let Some((target, tgt_ipcd)) = route_ipc_peer(me, ipcd) else {
+                if let Some(con) = conn_mut(me, ipcd) {
+                    con.state = IPCState::Open;
+                }
+                return 1;
+            };
 
-            while !(*me).ipc_con.has_msg {
+            if write_ipc(target, tgt_ipcd, arg2 as *const u8, arg3 as i32) != 0 {
+                if let Some(con) = conn_mut(me, ipcd) {
+                    con.state = IPCState::Open;
+                }
+                return 1;
+            }
+
+            loop {
+                let con = conn_mut(me, ipcd).unwrap();
+                if con.has_msg {
+                    break;
+                }
                 scheduler::block_current();
             }
-            (*me).ipc_con.has_msg = false;
-            (*me).ipc_con.state = IPCState::Open;
 
             let out = arg4 as *mut IPCMessage;
-            *out = (*me).ipc_con.msg;
+            let con = conn_mut(me, ipcd).unwrap();
+            *out = con.msg;
+            con.has_msg = false;
+            con.state = IPCState::Open;
             return 0;
         },
         12 => unsafe {
             // ipc reply
             // arg1 message
             // arg2 is the len of the message
+            // arg3 is my ipcd
             let me = get_current_task();
-            let peer = find_task_by_pid((*me).ipc_con.peer_pid);
-            if peer.is_null() {
+            if me.is_null() {
                 return 1;
             }
-            write_ipc(peer, arg1 as *const u8, arg2 as i32);
-            return 0;
+            let Some((peer, peer_ipcd)) = route_ipc_peer(me, arg3 as i32) else {
+                return 1;
+            };
+            return write_ipc(peer, peer_ipcd, arg1 as *const u8, arg2 as i32) as u64;
+        },
+        13 => unsafe {
+            // ipc register a connection
+            // arg 1 is the peer pid
+            // returns the ipcd (ipc descriptor / poor mans fd)
+            let me = get_current_task();
+            if me.is_null() {
+                return u64::MAX;
+            }
+            let ipcd = match find_conn_to(me, arg1 as i32) {
+                Some(i) => i,
+                None => alloc_con(me, arg1 as i32),
+            };
+            return ipcd as u64;
+        },
+        14 => unsafe {
+            // recv anything
+            // makes it so servers with more than 1 client can just like wake up when something
+            // happens and doesnt wait on a singel cleint
+            // arg1 is an out param for the ipcmessage
+            // returns the ipcd that responded
+            let task = cpu::get_current_task();
+            if task.is_null() {
+                return 1;
+            }
+
+            if conn_mut(task, arg2 as i32).is_none() {
+                return 1;
+            }
+            let mut msg_out = IPCMessage::default();
+            return recv_any(task, core::ptr::addr_of_mut!(msg_out)) as u64;
         },
         _ => u64::MAX,
     }

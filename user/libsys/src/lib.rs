@@ -27,3 +27,26 @@ pub unsafe fn inb(port: u16) -> u8 {
     core::arch::asm!("in al, dx", in("dx") port, out("al") v, options(nostack, nomem));
     return v;
 }
+
+pub fn call(ipcd: i32, msg: IPCMessage) -> IPCMessage {
+    let mut reply = IPCMessage {
+        data: [0; 256],
+        len: 0,
+    };
+    unsafe {
+        syscall(
+            11,
+            ipcd as u64,
+            msg.data.as_ptr() as u64,
+            msg.len as u64,
+            &mut reply as *mut _ as u64,
+        );
+    }
+    return reply;
+}
+
+pub fn connect(peer_pid: i32) -> i32 {
+    unsafe {
+        return syscall(13, peer_pid as u64, 0, 0, 0) as i32;
+    }
+}

@@ -43,6 +43,7 @@ user:
 	$(call build_user,hello)
 	$(call build_user,spinb)
 	$(call build_user,spina)
+	$(call build_user,vfs)
 	$(call build_user,kb_driver)
 	$(call build_user,the-initializer)
 

@@ -3,7 +3,7 @@ use core::ptr::null_mut;
 use crate::{
     cpu::{get_current_task, set_current_task, set_stack_top},
     gdt,
-    ipc::IPCConnection,
+    ipc::{IPCConnection, MAX_IPC_CONNECTIONS_PER_TASK},
     pmm,
 };
 
@@ -29,7 +29,7 @@ pub struct Task {
     kstack_top: u64,
     pub cr3: u64,
     pub pid: i32,
-    pub ipc_con: IPCConnection,
+    pub ipc_con: [Option<IPCConnection>; MAX_IPC_CONNECTIONS_PER_TASK],
 }
 
 pub const MAX_TASKS_PER_PRIORITY: usize = 16;
@@ -177,7 +177,7 @@ pub fn spawn_task(entry: fn(), priority: u8) {
             kstack_top: top as u64,
             cr3: cr3,
             pid: next_pid(),
-            ipc_con: IPCConnection::default(),
+            ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
         };
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
@@ -211,7 +211,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8) 
             kstack_top: top as u64,
             cr3: cr3,
             pid: next_pid(),
-            ipc_con: IPCConnection::default(),
+            ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
         };
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {

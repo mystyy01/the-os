@@ -1,4 +1,7 @@
-use crate::scheduler;
+use crate::{
+    ipc::{alloc_con, conn_mut, find_conn_to},
+    scheduler,
+};
 
 static mut IRQ_HANDLERS: [i32; 16] = [-1; 16];
 
@@ -23,9 +26,16 @@ pub fn dispatch(irq: usize) {
         if task.is_null() {
             return;
         }
-        (*task).ipc_con.peer_pid = 0;
-        (*task).ipc_con.msg.len = 0;
-        (*task).ipc_con.has_msg = true;
+        let ipcd = match find_conn_to(task, 0) {
+            Some(ipcd) => ipcd,
+            None => alloc_con(task, 0),
+        };
+        if ipcd < 0 {
+            return;
+        }
+        let con = conn_mut(task, ipcd).unwrap();
+        con.msg.len = 0;
+        con.has_msg = true;
         scheduler::wake(Some(task));
     }
 }
