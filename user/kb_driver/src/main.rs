@@ -28,9 +28,18 @@ unsafe extern "C" fn _start() {
     unsafe {
         syscall(10, 1, 0, 0, 0);
     }
+    let mut msg1 = IPCMessage {
+        data: [0; 256],
+        len: 0,
+    };
+    unsafe {
+        syscall(7, &mut msg1 as *mut _ as u64, 0, 0, 0);
+    }
+    unsafe {
+        syscall(12, "im alive!".as_ptr() as u64, 9, 0, 0);
+    }
     loop {
         let mut msg = IPCMessage {
-            sender_pid: -1,
             data: [0; 256],
             len: 0,
         };

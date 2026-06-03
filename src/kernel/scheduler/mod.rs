@@ -3,7 +3,7 @@ use core::ptr::null_mut;
 use crate::{
     cpu::{get_current_task, set_current_task, set_stack_top},
     gdt,
-    ipc::IPCMessage,
+    ipc::IPCConnection,
     pmm,
 };
 
@@ -29,8 +29,7 @@ pub struct Task {
     kstack_top: u64,
     pub cr3: u64,
     pub pid: i32,
-    pub pid_waiting_ipc: i32,
-    pub ipc_msg: IPCMessage,
+    pub ipc_con: IPCConnection,
 }
 
 pub const MAX_TASKS_PER_PRIORITY: usize = 16;
@@ -130,11 +129,11 @@ pub fn yield_now() {
 pub fn block_current() {
     unsafe {
         let prev = get_current_task();
+        (*prev).state = TaskState::Blocked;
         if let Some(next) = find_next_task() {
             if next == prev {
                 return;
             }
-            (*prev).state = TaskState::Blocked;
             set_current_task(Some(next));
             core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
             set_stack_top((*next).kstack_top);
@@ -178,8 +177,7 @@ pub fn spawn_task(entry: fn(), priority: u8) {
             kstack_top: top as u64,
             cr3: cr3,
             pid: next_pid(),
-            ipc_msg: IPCMessage::default(),
-            pid_waiting_ipc: -1,
+            ipc_con: IPCConnection::default(),
         };
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
@@ -190,7 +188,7 @@ pub fn spawn_task(entry: fn(), priority: u8) {
     }
 }
 
-pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8) {
+pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8) -> i32 {
     let stack = crate::pmm::alloc_pages(2) as *mut u8;
     unsafe {
         let kstack_phys = pmm::alloc_pages(1) as u64;
@@ -213,8 +211,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8) 
             kstack_top: top as u64,
             cr3: cr3,
             pid: next_pid(),
-            ipc_msg: IPCMessage::default(),
-            pid_waiting_ipc: -1,
+            ipc_con: IPCConnection::default(),
         };
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
@@ -222,6 +219,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8) 
                 break;
             }
         }
+        return task.pid;
     }
 }
 

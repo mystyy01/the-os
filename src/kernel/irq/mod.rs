@@ -23,8 +23,9 @@ pub fn dispatch(irq: usize) {
         if task.is_null() {
             return;
         }
-        (*task).ipc_msg.sender_pid = 0;
-        (*task).ipc_msg.len = 0;
+        (*task).ipc_con.peer_pid = 0;
+        (*task).ipc_con.msg.len = 0;
+        (*task).ipc_con.has_msg = true;
         scheduler::wake(Some(task));
     }
 }

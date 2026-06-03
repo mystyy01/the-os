@@ -1,10 +1,11 @@
 use crate::{
-    cpu, elf,
-    ipc::{IPCMessage, read_ipc, write_ipc},
+    cpu::{self, get_current_task},
+    elf,
+    ipc::{IPCMessage, IPCState, read_ipc, write_ipc},
     irq,
     msr::{rdmsr, wrmsr},
     pmm::{self, PAGE_SIZE},
-    scheduler::{self, find_task_by_pid, yield_now},
+    scheduler::{self, TaskState, find_task_by_pid, yield_now},
     serial::{self, write_hex},
     vmm,
 };
@@ -68,6 +69,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             return 0;
         },
         5 => unsafe {
+            // spawn task
             let pml4 = vmm::create_address_space();
             let entry = elf::load(arg1 as *const u8, arg2 as usize, pml4);
             if entry == None {
@@ -76,8 +78,9 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             }
             let stack_phys = pmm::alloc_pages(0) as u64;
             vmm::map_page(pml4, USER_STACK, stack_phys, 0x07);
-            scheduler::spawn_user_task(entry.unwrap(), USER_STACK + 0x1000, pml4 as u64, 1);
-            return 0;
+            let child_pid =
+                scheduler::spawn_user_task(entry.unwrap(), USER_STACK + 0x1000, pml4 as u64, 1);
+            return child_pid as u64;
         },
         6 => {
             // ipc write
@@ -134,6 +137,46 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             irq::register(arg1 as usize, pid);
             return 0;
         }
+        11 => unsafe {
+            // call - basicalyl ipc write AND then read to wait for tha repsonse
+            // arg1 is the pid target
+            // arg2 is the message
+            // arg3 is the len of the message
+            // arg4 is the out param for the message back
+
+            let target = find_task_by_pid(arg1 as i32);
+            if target.is_null() {
+                return 1;
+            }
+            let me = get_current_task();
+
+            (*me).ipc_con.peer_pid = arg1 as i32;
+            (*me).ipc_con.state = IPCState::AwaitingReply;
+
+            write_ipc(target, arg2 as *const u8, arg3 as i32);
+
+            while !(*me).ipc_con.has_msg {
+                scheduler::block_current();
+            }
+            (*me).ipc_con.has_msg = false;
+            (*me).ipc_con.state = IPCState::Open;
+
+            let out = arg4 as *mut IPCMessage;
+            *out = (*me).ipc_con.msg;
+            return 0;
+        },
+        12 => unsafe {
+            // ipc reply
+            // arg1 message
+            // arg2 is the len of the message
+            let me = get_current_task();
+            let peer = find_task_by_pid((*me).ipc_con.peer_pid);
+            if peer.is_null() {
+                return 1;
+            }
+            write_ipc(peer, arg1 as *const u8, arg2 as i32);
+            return 0;
+        },
         _ => u64::MAX,
     }
 }
