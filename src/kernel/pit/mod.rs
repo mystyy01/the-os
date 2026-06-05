@@ -1,4 +1,9 @@
-use crate::{cpu, io::outb, scheduler, serial::write_str};
+use crate::{
+    cpu,
+    io::outb,
+    scheduler,
+    serial::{write_hex, write_str},
+};
 
 pub fn init(hz: u32) {
     let divisor: u32 = 1193182 / hz;
@@ -17,5 +22,6 @@ pub fn irq0_handler(frame: *mut u64) {
             return;
         }
     }
+
     scheduler::yield_now();
 }

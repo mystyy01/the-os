@@ -5,7 +5,7 @@ use crate::{
     irq,
     msr::{rdmsr, wrmsr},
     pmm,
-    scheduler::{self, Task, find_task_by_pid, yield_now},
+    scheduler::{self, Task, TaskState, find_task_by_pid, yield_now},
     serial, vmm,
 };
 
@@ -93,10 +93,20 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
                 vmm::free_table(pml4 as u64, 4);
                 return u64::MAX;
             }
-            let stack_phys = pmm::alloc_pages(0) as u64;
-            vmm::map_page(pml4, USER_STACK, stack_phys, 0x07);
-            let child_pid =
-                scheduler::spawn_user_task(entry.unwrap(), USER_STACK + 0x1000, pml4 as u64, 1);
+
+            let stack_pages: u64 = 8; // 32 kilo byteroonies should be enuff
+            let mut i: u64 = 0;
+            while i < stack_pages {
+                let sp = pmm::alloc_pages(0) as u64;
+                vmm::map_page(pml4, USER_STACK + i * 0x1000, sp, 0x07);
+                i += 1;
+            }
+            let child_pid = scheduler::spawn_user_task(
+                entry.unwrap(),
+                USER_STACK + stack_pages * 0x1000,
+                pml4 as u64,
+                1,
+            );
             return child_pid as u64;
         },
         6 => {
@@ -205,7 +215,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
 
             let out = arg4 as *mut IPCMessage;
             let con = conn_mut(me, ipcd).unwrap();
-            *out = con.msg;
+            *out = crate::ipc::IPC_POOL[con.ipc_pool_idx as usize];
             con.has_msg = false;
             con.state = IPCState::Open;
             return 0;
@@ -239,7 +249,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             return ipcd as u64;
         },
         14 => unsafe {
-            // recv anything
+            // recv_any
             // makes it so servers with more than 1 client can just like wake up when something
             // happens and doesnt wait on a singel cleint
             // arg1 is an out param for the ipcmessage
@@ -248,12 +258,11 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             if task.is_null() {
                 return 1;
             }
-
-            if conn_mut(task, arg2 as i32).is_none() {
-                return 1;
-            }
             let mut msg_out = IPCMessage::default();
-            return recv_any(task, core::ptr::addr_of_mut!(msg_out)) as u64;
+            let ipcd = recv_any(task, core::ptr::addr_of_mut!(msg_out)) as u64;
+            let out = arg1 as *mut IPCMessage;
+            *out = msg_out;
+            return ipcd;
         },
         _ => u64::MAX,
     }

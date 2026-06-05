@@ -4,7 +4,7 @@ use crate::{
     cpu::{get_current_task, set_current_task, set_stack_top},
     gdt,
     ipc::{IPCConnection, MAX_IPC_CONNECTIONS_PER_TASK},
-    pmm,
+    pmm, serial,
 };
 
 unsafe extern "C" {
@@ -26,7 +26,7 @@ pub struct Task {
     pub state: TaskState,
     pub stack: *mut u8,
     pub ksp: u64,
-    kstack_top: u64,
+    pub kstack_top: u64,
     pub cr3: u64,
     pub pid: i32,
     pub ipc_con: [Option<IPCConnection>; MAX_IPC_CONNECTIONS_PER_TASK],
@@ -213,6 +213,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8) 
             pid: next_pid(),
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
         };
+
         for (i, t) in SCHEDULER.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
                 SCHEDULER.queues[priority as usize][i] = Some(task);

@@ -11,6 +11,7 @@ members = [
     "init",
     "services/vfs",
     "drivers/kb_driver",
+    "shell",
     "examples/hello",
     "examples/goodbye",
     "examples/spina",

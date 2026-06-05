@@ -45,6 +45,7 @@ user:
 	$(call build_user,spina)
 	$(call build_user,vfs)
 	$(call build_user,kb_driver)
+	$(call build_user,shell)
 	$(call build_user,the-initializer)
 
 rust: user

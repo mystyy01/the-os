@@ -40,7 +40,9 @@ pub fn alloc_pages(order: usize) -> *mut u8 {
             let free_block = BUDDY.free_lists[order];
             BUDDY.free_lists[order] = (*free_block).next;
             BUDDY.free_memory -= PAGE_SIZE << order;
-            return (free_block as u64 - vmm::HHDM_BASE) as *mut u8;
+            let pa = (free_block as u64) - vmm::HHDM_BASE;
+
+            return pa as *mut u8;
         }
         if order + 1 >= MAX_ORDER {
             return null_mut();
@@ -50,6 +52,7 @@ pub fn alloc_pages(order: usize) -> *mut u8 {
             return null_mut();
         }
         free_page(block as u64 + (PAGE_SIZE << order), order);
+
         return block;
     }
 }

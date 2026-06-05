@@ -20,7 +20,7 @@ unsafe impl GlobalAlloc for KernelHeap {
                 return null_mut();
             }
             if PAGE_SIZE << curr_order >= size as u64 {
-                return alloc_pages(curr_order);
+                return crate::vmm::phys_to_virt(alloc_pages(curr_order) as u64) as *mut u8;
             }
             curr_order += 1;
         }
@@ -33,7 +33,7 @@ unsafe impl GlobalAlloc for KernelHeap {
                 return;
             }
             if PAGE_SIZE << curr_order >= size as u64 {
-                free_pages(curr_order, ptr as u64);
+                free_pages(curr_order, ptr as u64 - crate::vmm::HHDM_BASE);
                 return;
             }
             curr_order += 1;

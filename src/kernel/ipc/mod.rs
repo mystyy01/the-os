@@ -1,3 +1,5 @@
+use core::usize;
+
 use crate::{
     cpu,
     scheduler::{self, Task, TaskState, wake},
@@ -6,6 +8,14 @@ use crate::{
 
 const MAX_IPC_MSG_LEN: usize = 256;
 pub const MAX_IPC_CONNECTIONS_PER_TASK: usize = 32;
+
+const IPC_POOL_SIZE: usize = 128;
+const EMPTY_MSG: IPCMessage = IPCMessage {
+    data: [0u8; MAX_IPC_MSG_LEN],
+    len: 0,
+};
+pub static mut IPC_POOL: [IPCMessage; IPC_POOL_SIZE] = [EMPTY_MSG; IPC_POOL_SIZE];
+pub static mut IPC_POOL_USED: [bool; IPC_POOL_SIZE] = [false; IPC_POOL_SIZE];
 
 #[derive(Clone, Copy)]
 pub struct IPCMessage {
@@ -36,7 +46,7 @@ pub enum IPCState {
 pub struct IPCConnection {
     pub peer_pid: i32,
     pub state: IPCState,
-    pub msg: IPCMessage,
+    pub ipc_pool_idx: i32,
     pub has_msg: bool,
 }
 
@@ -45,8 +55,28 @@ impl Default for IPCConnection {
         IPCConnection {
             peer_pid: -1,
             state: IPCState::PeerDead,
-            msg: IPCMessage::default(),
+            ipc_pool_idx: -1,
             has_msg: false,
+        }
+    }
+}
+
+pub fn alloc_msg() -> i32 {
+    for i in 0..IPC_POOL_SIZE {
+        unsafe {
+            if !IPC_POOL_USED[i] {
+                IPC_POOL_USED[i] = true;
+                return i as i32;
+            }
+        }
+    }
+    return -1;
+}
+
+pub fn free_msg(idx: i32) {
+    if idx >= 0 {
+        unsafe {
+            IPC_POOL_USED[idx as usize] = false;
         }
     }
 }
@@ -69,12 +99,9 @@ pub fn alloc_con(task: *mut Task, peer_pid: i32) -> i32 {
     if ipcd < 0 {
         return -1;
     }
-    let con = IPCConnection {
-        peer_pid: peer_pid,
-        state: IPCState::Open,
-        msg: IPCMessage::default(),
-        has_msg: false,
-    };
+    let mut con = IPCConnection::default();
+    con.peer_pid = peer_pid;
+    con.state = IPCState::Open;
     unsafe {
         (*task).ipc_con[ipcd as usize] = Some(con);
     }
@@ -110,13 +137,6 @@ pub fn write_ipc(task: *mut Task, ipcd: i32, msg: *const u8, msg_len: i32) -> i3
             return 1;
         }
 
-        serial::write_str("IPC sent to: ");
-        serial::write_hex((*task).pid as u64);
-        serial::write_str("\nwith message: ");
-        for i in 0..msg_len {
-            serial::write_byte(*msg.add(i as usize));
-        }
-
         let con = conn_mut(task, ipcd).unwrap();
         let sender = (*cpu::get_current_task()).pid;
         if (*task).state == TaskState::Blocked {
@@ -129,12 +149,19 @@ pub fn write_ipc(task: *mut Task, ipcd: i32, msg: *const u8, msg_len: i32) -> i3
                 _ => {}
             }
         }
-
+        if con.ipc_pool_idx < 0 {
+            con.ipc_pool_idx = alloc_msg();
+            if con.ipc_pool_idx < 0 {
+                return 1;
+            }
+        }
+        let idx = con.ipc_pool_idx as usize;
         let n = core::cmp::min(msg_len as usize, MAX_IPC_MSG_LEN);
         for i in 0..n {
-            con.msg.data[i] = *msg.add(i);
+            IPC_POOL[idx].data[i] = *msg.add(i);
         }
-        con.msg.len = n as usize;
+        IPC_POOL[idx].len = n;
+
         con.has_msg = true;
 
         if (*task).state == TaskState::Blocked {
@@ -155,7 +182,7 @@ pub fn read_ipc(task: *mut Task, ipcd: i32) -> *const IPCMessage {
             scheduler::block_current();
         }
         let con = conn_mut(task, ipcd).unwrap();
-        let msg = core::ptr::addr_of!(con.msg);
+        let msg = core::ptr::addr_of!(IPC_POOL[con.ipc_pool_idx as usize]);
         con.has_msg = false;
         return msg;
     }
@@ -163,13 +190,16 @@ pub fn read_ipc(task: *mut Task, ipcd: i32) -> *const IPCMessage {
 
 pub fn recv_any(task: *mut Task, msg_out: *mut IPCMessage) -> i32 {
     unsafe {
-        for i in 0..MAX_IPC_CONNECTIONS_PER_TASK {
-            if (*task).ipc_con[i].is_some() && (*task).ipc_con[i].unwrap().has_msg {
-                // this is a uhh message needed to be sent
-                *msg_out = (*task).ipc_con[i].unwrap().msg;
-                return i as i32;
+        loop {
+            for i in 0..MAX_IPC_CONNECTIONS_PER_TASK {
+                if (*task).ipc_con[i].is_some() && (*task).ipc_con[i].unwrap().has_msg {
+                    let idx = (*task).ipc_con[i].unwrap().ipc_pool_idx;
+                    *msg_out = IPC_POOL[idx as usize];
+                    (*task).ipc_con[i].as_mut().unwrap().has_msg = false;
+                    return i as i32;
+                }
             }
+            scheduler::block_current();
         }
     }
-    return -1;
 }

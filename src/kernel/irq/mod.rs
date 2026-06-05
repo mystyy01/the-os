@@ -34,7 +34,14 @@ pub fn dispatch(irq: usize) {
             return;
         }
         let con = conn_mut(task, ipcd).unwrap();
-        con.msg.len = 0;
+        if con.ipc_pool_idx < 0 {
+            con.ipc_pool_idx = crate::ipc::alloc_msg();
+            if con.ipc_pool_idx < 0 {
+                return;
+            }
+        }
+        crate::ipc::IPC_POOL[con.ipc_pool_idx as usize].data[0] = 6; // opcode for irq (check libsys)
+        crate::ipc::IPC_POOL[con.ipc_pool_idx as usize].len = 1;
         con.has_msg = true;
         scheduler::wake(Some(task));
     }
