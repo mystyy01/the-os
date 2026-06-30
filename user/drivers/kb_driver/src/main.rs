@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use libsys::{IPCMessage, OP_IRQ, OP_READ, inb, register, serve, syscall};
+use libsys::{OP_IRQ, OP_READ, SVC_KBD, inb, register, serve, syscall};
 
 const SET1: [u8; 0x3A] = [
     0, 0, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'=', 0x08, 0x09, b'q',
@@ -53,46 +53,43 @@ fn buf_pop() -> Option<KBEvent> {
         Some(b)
     }
 }
-fn on_read(_req: &IPCMessage, reply: &mut IPCMessage) {
+fn on_read(_req: &[u8], reply: &mut [u8]) -> usize {
     if let Some(ev) = buf_pop() {
-        reply.data[0] = ev.val;
-        reply.data[1] = ev.state as u8;
-        reply.len = 2;
+        reply[0] = ev.val;
+        reply[1] = ev.state as u8;
+        2
     } else {
-        reply.len = 0;
+        0
     }
 }
 
-fn on_irq(_req: &IPCMessage, _reply: &mut IPCMessage) {
+fn on_irq(_req: &[u8], _reply: &mut [u8]) -> usize {
     let sc = unsafe { inb(0x60) };
-
     let down = (sc & 0x80) == 0;
     let code = (sc & 0x7F) as usize;
     let val = if code < SET1.len() { SET1[code] } else { 0 };
     if val != 0 {
-        let kbev = KBEvent {
-            val: val,
+        buf_push(KBEvent {
+            val,
             state: if down {
                 KBButtonState::Press
             } else {
                 KBButtonState::Release
             },
-        };
-        buf_push(kbev);
+        });
     }
+    0
 }
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
-    let irq_ipcd = unsafe { syscall(13, 0, 0, 0, 0) };
-
-    // register for keyboard shit
     unsafe {
+        // register for keyboard shit
         syscall(10, 1, 0, 0, 0);
     }
 
     register(OP_IRQ, on_irq);
     register(OP_READ, on_read);
 
-    serve();
+    serve(SVC_KBD);
 }

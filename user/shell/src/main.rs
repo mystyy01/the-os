@@ -1,16 +1,10 @@
 #![no_std]
 #![no_main]
 
-use libsys::{open, print, read};
+use libsys::{mailboxes, open, print, read};
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
-    let v = unsafe { core::ptr::read_volatile(0x5000_0000 as *const u64) };
-    if v == 0xDEADBEEF {
-        print("ARENA OK\n");
-    } else {
-        print("ARENA BAD\n");
-    }
     let mut line_buf = [0u8; 256];
     let mut line_len: usize = 0;
     let kb_fd = open("/dev/keyboard".as_bytes());

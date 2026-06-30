@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use libsys::{IPCMessage, OP_READ, get_self_pid, inb, inw, outb, print, register, serve, vfs_bind};
+use libsys::{OP_READ, SVC_ATA, inb, inw, outb, print, register, serve, vfs_bind};
 
 fn wait_ready() -> i32 {
     let mut counter: u32 = 100000;
@@ -121,19 +121,16 @@ fn read_sectors(lba: u32, count: u8, buf: &mut [u16]) -> i32 {
     return 0;
 }
 
-fn on_read(req: &IPCMessage, reply: &mut IPCMessage) {
+fn on_read(req: &[u8], reply: &mut [u8]) -> usize {
     let mut buf = [0u16; 2048];
     let buf_bytes =
         unsafe { core::slice::from_raw_parts(buf.as_ptr() as *const u8, buf.len() * 2) };
-
-    let lba = u32::from_le_bytes([req.data[1], req.data[2], req.data[3], req.data[4]]);
-    let count = req.data[5];
-
+    let lba = u32::from_le_bytes([req[1], req[2], req[3], req[4]]);
+    let count = req[5];
     read_sectors(lba, count, &mut buf);
-
     let len = count as usize * 512;
-    reply.data[..len].copy_from_slice(&buf_bytes[..len]);
-    reply.len = len;
+    reply[..len].copy_from_slice(&buf_bytes[..len]);
+    len
 }
 
 #[unsafe(no_mangle)]
@@ -142,9 +139,9 @@ unsafe extern "C" fn _start() -> ! {
         panic!();
     }
 
-    vfs_bind("/dev/ata0".as_bytes(), get_self_pid());
+    vfs_bind("/dev/ata0".as_bytes(), SVC_ATA);
 
     register(OP_READ, on_read);
 
-    serve();
+    serve(SVC_ATA);
 }

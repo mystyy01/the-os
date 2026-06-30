@@ -62,12 +62,12 @@ impl Default for IPCConnection {
 }
 
 pub const ARENA_VADDR: u64 = 0x5000_0000;
-pub const ARENA_PAGES: u64 = 16;
+pub const ARENA_PAGES: u64 = 128;
 pub static mut ARENA_PHYS: u64 = 0;
 
 pub fn init() {
     unsafe {
-        let phys = crate::pmm::alloc_pages(4) as u64; // order 4 = 16 contiguous pages
+        let phys = crate::pmm::alloc_pages(7) as u64; // order 4 = 16 contiguous pages
         core::ptr::write_bytes(
             crate::vmm::phys_to_virt(phys) as *mut u8,
             0,

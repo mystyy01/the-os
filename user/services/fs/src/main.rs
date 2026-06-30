@@ -4,8 +4,8 @@
 mod fake_libc_thing;
 
 use libsys::{
-    self, IPCMessage, OP_OPEN, OP_READ, OP_WRITE, call, connect, get_self_pid, print, register,
-    serve, vfs_bind, vfs_resolve,
+    OP_OPEN, OP_READ, OP_WRITE, SVC_ATA, SVC_FS, mbox_call, mbox_connect, print, register, serve,
+    vfs_bind, vfs_resolve,
 };
 
 // needs to match lwext4
@@ -37,20 +37,20 @@ struct Ext4Blockdev {
 }
 
 unsafe extern "C" fn bread(
-    bdev: *mut Ext4Blockdev,
+    _bdev: *mut Ext4Blockdev,
     buf: *mut u8,
     blk_id: u64,
     blk_cnt: u32,
 ) -> i32 {
-    let mut data = [0u8; 4096];
-    data[0] = OP_READ;
-    data[1..5].copy_from_slice(&(blk_id as u32).to_le_bytes());
-    data[5] = blk_cnt as u8;
-    let msg = IPCMessage { data, len: 6 };
-    let reply = call(ATA_IPCD, msg);
-    let len = blk_cnt as usize * 512;
-    core::ptr::copy_nonoverlapping(reply.data.as_ptr(), buf, len);
-    return 0;
+    let mut req = [0u8; 8];
+    req[0] = OP_READ;
+    req[1..5].copy_from_slice(&(blk_id as u32).to_le_bytes());
+    req[5] = blk_cnt as u8;
+    let mut reply = [0u8; 4096];
+    let n = mbox_call(ATA_CONN, &req[..6], &mut reply);
+    let len = (blk_cnt as usize * 512).min(n);
+    core::ptr::copy_nonoverlapping(reply.as_ptr(), buf, len);
+    0
 }
 
 unsafe extern "C" fn bd_open(_bdev: *mut Ext4Blockdev) -> i32 {
@@ -60,7 +60,7 @@ unsafe extern "C" fn bd_close(_bdev: *mut Ext4Blockdev) -> i32 {
     0
 }
 
-static mut ATA_IPCD: i32 = -1;
+static mut ATA_CONN: usize = 0;
 static mut IFACE: Ext4BlockdevIface = Ext4BlockdevIface {
     open: None,
     bread: None,
@@ -112,8 +112,7 @@ static mut FILES: [Ext4File; MAX_FILES] = [Ext4File {
 }; MAX_FILES];
 static mut USED: [bool; MAX_FILES] = [false; MAX_FILES];
 
-fn on_open(req: &IPCMessage, reply: &mut IPCMessage) {
-    // req: [OP_OPEN][path bytes...], path NUL-terminated by us
+fn on_open(req: &[u8], reply: &mut [u8]) -> usize {
     let mut slot = -1i32;
     unsafe {
         for i in 0..MAX_FILES {
@@ -124,17 +123,12 @@ fn on_open(req: &IPCMessage, reply: &mut IPCMessage) {
         }
     }
     if slot < 0 {
-        reply.data[..4].copy_from_slice(&(-1i32).to_le_bytes());
-        reply.len = 4;
-        return;
+        reply[..4].copy_from_slice(&(-1i32).to_le_bytes());
+        return 4;
     }
-
-    // build a NUL-terminated C path from the request payload
     let mut path = [0u8; 256];
-    let n = core::cmp::min(req.len - 1, 254);
-    path[..n].copy_from_slice(&req.data[1..1 + n]);
-    // path[n] already 0
-
+    let n = core::cmp::min(req.len() - 1, 254);
+    path[..n].copy_from_slice(&req[1..1 + n]);
     let rc = unsafe {
         ext4_fopen(
             &raw mut FILES[slot as usize],
@@ -150,35 +144,33 @@ fn on_open(req: &IPCMessage, reply: &mut IPCMessage) {
     } else {
         -1
     };
-    reply.data[..4].copy_from_slice(&handle.to_le_bytes());
-    reply.len = 4;
+    reply[..4].copy_from_slice(&handle.to_le_bytes());
+    4
 }
 
-fn on_read(req: &IPCMessage, reply: &mut IPCMessage) {
-    // req: [OP_READ][handle i32][maxlen u32]
-    let handle = i32::from_le_bytes([req.data[1], req.data[2], req.data[3], req.data[4]]);
-    let maxlen = u32::from_le_bytes([req.data[5], req.data[6], req.data[7], req.data[8]]) as usize;
+fn on_read(req: &[u8], reply: &mut [u8]) -> usize {
+    let handle = i32::from_le_bytes([req[1], req[2], req[3], req[4]]);
+    let maxlen = u32::from_le_bytes([req[5], req[6], req[7], req[8]]) as usize;
     if handle < 0 || handle as usize >= MAX_FILES || unsafe { !USED[handle as usize] } {
-        reply.len = 0;
-        return;
+        return 0;
     }
-    let want = core::cmp::min(maxlen, reply.data.len());
+    let want = core::cmp::min(maxlen, reply.len());
     let mut got: usize = 0;
     unsafe {
         ext4_fread(
             &raw mut FILES[handle as usize],
-            reply.data.as_mut_ptr(),
+            reply.as_mut_ptr(),
             want,
             &mut got,
         );
     }
-    reply.len = got;
+    got
 }
 
-fn on_write(req: &IPCMessage, reply: &mut IPCMessage) {
-    let n = req.len.saturating_sub(1) as i32;
-    reply.data[..4].copy_from_slice(&n.to_le_bytes());
-    reply.len = 4;
+fn on_write(req: &[u8], reply: &mut [u8]) -> usize {
+    let n = req.len().saturating_sub(1) as i32;
+    reply[..4].copy_from_slice(&n.to_le_bytes());
+    4
 }
 
 static mut PH_BBUF: [u8; 512] = [0; 512];
@@ -199,18 +191,18 @@ unsafe extern "C" fn bd_bwrite(
 }
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
-    let mut ata_pid = vfs_resolve("/dev/ata0".as_bytes());
-    while ata_pid < 0 {
-        ata_pid = vfs_resolve("/dev/ata0".as_bytes());
-    }
-    let ata_ipcd = connect(ata_pid);
-    if ata_ipcd < 0 {
-        print("FS: ata BAD\n");
-    } else {
-        print("FS: ata ok\n");
-    }
+    let ata = loop {
+        let r = vfs_resolve("/dev/ata0".as_bytes());
+        if r != 0 {
+            break r;
+        }
+        unsafe {
+            libsys::syscall(9, 0, 0, 0, 0);
+        } // yield
+    };
+    let ata_conn = mbox_connect(ata);
     unsafe {
-        ATA_IPCD = ata_ipcd;
+        ATA_CONN = ata_conn;
 
         IFACE.bread = Some(bread);
         IFACE.open = Some(bd_open);
@@ -245,7 +237,7 @@ unsafe extern "C" fn _start() -> ! {
     register(OP_OPEN, on_open);
     register(OP_WRITE, on_write);
 
-    vfs_bind("/".as_bytes(), get_self_pid());
+    vfs_bind("/".as_bytes(), SVC_FS);
 
-    serve();
+    serve(SVC_FS);
 }
