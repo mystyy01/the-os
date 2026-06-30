@@ -1,4 +1,5 @@
 use crate::pmm::{alloc_pages, free_pages};
+use crate::serial;
 
 pub const HHDM_BASE: u64 = 0xFFFF800000000000;
 
@@ -82,6 +83,7 @@ pub unsafe fn unmap_page(pml4: *mut u64, virt: u64) {
 pub unsafe fn free_table(table: u64, depth: u8) {
     unsafe {
         let virt = phys_to_virt(table) as *mut u64;
+
         for i in 0..512 {
             if depth == 4 && (i == 0 || i == 256 || i == 511) {
                 continue;

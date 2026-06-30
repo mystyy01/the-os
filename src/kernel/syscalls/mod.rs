@@ -94,7 +94,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
                 return u64::MAX;
             }
 
-            let stack_pages: u64 = 8; // 32 kilo byteroonies should be enuff
+            let stack_pages: u64 = 64; // 256 kilo byteroonies should be enuff
             let mut i: u64 = 0;
             while i < stack_pages {
                 let sp = pmm::alloc_pages(0) as u64;
@@ -106,6 +106,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
                 USER_STACK + stack_pages * 0x1000,
                 pml4 as u64,
                 1,
+                arg3 as u8,
             );
             return child_pid as u64;
         },
@@ -263,6 +264,10 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             let out = arg1 as *mut IPCMessage;
             *out = msg_out;
             return ipcd;
+        },
+        15 => unsafe {
+            // get self pid
+            return (*cpu::get_current_task()).pid as u64;
         },
         _ => u64::MAX,
     }

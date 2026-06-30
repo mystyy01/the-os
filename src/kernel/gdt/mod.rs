@@ -1,41 +1,73 @@
-unsafe extern "C" {
-    static mut tss: u8;
-    static tss_end: u8;
-    static gdt_start: u8;
-    static gdt_end: u8;
+use crate::lapic;
+
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+struct Tss {
+    reserved0: u32,
+    rsp: [u64; 3],
+    reserved1: u64,
+    ist: [u64; 7],
+    reserved2: u64,
+    reserved3: u16,
+    iomap_base: u16,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct CpuGdt {
+    entries: [u64; 7],
+    tss: Tss,
 }
 
 #[repr(C, packed)]
-struct GDTR {
+struct Gdtr {
     limit: u16,
     base: u64,
 }
 
-pub fn init(kernel_stack_top: u64) {
-    let tss_addr = &raw mut tss as u64;
-    let tss_size = (&raw const tss_end as u64) - tss_addr;
+const TSS_SIZE: u16 = core::mem::size_of::<Tss>() as u16;
+const MAX_CPUS: usize = 8;
+
+static mut CPU_GDTS: [CpuGdt; MAX_CPUS] = [CpuGdt {
+    entries: [
+        0x0000000000000000,
+        0x00AF9A000000FFFF,
+        0x00AF92000000FFFF,
+        0x00AFF2000000FFFF,
+        0x00AFFA000000FFFF,
+        0,
+        0,
+    ],
+    tss: Tss {
+        reserved0: 0,
+        rsp: [0; 3],
+        reserved1: 0,
+        ist: [0; 7],
+        reserved2: 0,
+        reserved3: 0,
+        iomap_base: TSS_SIZE,
+    },
+}; MAX_CPUS];
+
+pub fn init(cpu_id: u32, kernel_stack_top: u64) {
     unsafe {
-        let low = (tss_size & 0xFFFF)
+        let gdt = &mut CPU_GDTS[cpu_id as usize];
+        let tss_addr = core::ptr::addr_of!(gdt.tss) as u64;
+        let tss_limit = (TSS_SIZE - 1) as u64;
+
+        gdt.entries[5] = tss_limit & 0xFFFF
             | ((tss_addr & 0xFFFF) << 16)
             | (((tss_addr >> 16) & 0xFF) << 32)
             | (0x89u64 << 40)
             | (((tss_addr >> 24) & 0xFF) << 56);
-        let high = tss_addr >> 32;
+        gdt.entries[6] = tss_addr >> 32;
 
-        let gdt_base = &raw const gdt_start as *mut u64;
-        let tss_slot = gdt_base.add(5);
-        *tss_slot = low;
-        *tss_slot.add(1) = high;
+        let rsp0 = (core::ptr::addr_of_mut!(gdt.tss) as *mut u8).add(4) as *mut u64;
+        core::ptr::write_unaligned(rsp0, kernel_stack_top);
 
-        let rsp0_ptr = (&raw mut tss as *mut u8).add(4) as *mut u64;
-        rsp0_ptr.write_unaligned(kernel_stack_top);
-
-        let iomap_byte = (&raw mut tss as *mut u8).add(104 + 12);
-        *iomap_byte = 0xEE;
-
-        let gdtr = GDTR {
-            limit: ((&raw const gdt_end as u64) - (&raw const gdt_start as u64) - 1) as u16,
-            base: &raw const gdt_start as u64,
+        let gdtr = Gdtr {
+            limit: (core::mem::size_of::<[u64; 7]>() - 1) as u16,
+            base: core::ptr::addr_of!(gdt.entries) as u64,
         };
         core::arch::asm!("lgdt [{}]", in(reg) &gdtr, options(nostack));
         core::arch::asm!("ltr ax", in("ax") 0x28u16, options(nostack));
@@ -44,7 +76,8 @@ pub fn init(kernel_stack_top: u64) {
 
 pub fn set_rsp0(top: u64) {
     unsafe {
-        let rsp0_ptr = (&raw mut tss as *mut u8).add(4) as *mut u64;
-        rsp0_ptr.write_unaligned(top);
+        let tss = core::ptr::addr_of_mut!(CPU_GDTS[lapic::id() as usize].tss);
+        let rsp0 = (tss as *mut u8).add(4) as *mut u64;
+        core::ptr::write_unaligned(rsp0, top);
     }
 }

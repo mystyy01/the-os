@@ -221,6 +221,9 @@ section .boot.text
 
     global isr_33
     isr_no_err 33
+
+    global isr_64
+    isr_no_err 64
     
     global context_switch
 
@@ -249,7 +252,7 @@ section .boot.text
   user_entry_bouncy_trampoline_lol:
     push 0x1b
     push r14
-    push 0x202
+    push 0x3202
     push 0x23
     push r15
     swapgs

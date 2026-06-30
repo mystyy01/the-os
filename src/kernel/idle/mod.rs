@@ -1,4 +1,4 @@
-use crate::scheduler::spawn_task;
+use crate::scheduler::{spawn_idle, spawn_task};
 
 fn idle() {
     loop {
@@ -9,5 +9,5 @@ fn idle() {
 }
 
 pub fn setup_idle() {
-    spawn_task(idle, 0);
+    spawn_idle(idle);
 }

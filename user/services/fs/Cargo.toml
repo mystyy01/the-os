@@ -1,7 +1,8 @@
 [package]
-name = "goodbye"
+name = "fs"
 version = "0.1.0"
 edition = "2024"
+links = "lwext4"
 
 [dependencies]
 libsys = { path = "../../libsys" }

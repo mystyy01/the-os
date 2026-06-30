@@ -6,7 +6,7 @@ use crate::{
     serial,
 };
 
-const MAX_IPC_MSG_LEN: usize = 256;
+const MAX_IPC_MSG_LEN: usize = 4096;
 pub const MAX_IPC_CONNECTIONS_PER_TASK: usize = 32;
 
 const IPC_POOL_SIZE: usize = 128;

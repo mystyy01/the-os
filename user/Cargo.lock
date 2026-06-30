@@ -3,14 +3,14 @@
 version = 4
 
 [[package]]
-name = "goodbye"
+name = "ata_pio_driver"
 version = "0.1.0"
 dependencies = [
  "libsys",
 ]
 
 [[package]]
-name = "hello"
+name = "fs"
 version = "0.1.0"
 dependencies = [
  "libsys",
@@ -29,20 +29,6 @@ version = "0.1.0"
 
 [[package]]
 name = "shell"
-version = "0.1.0"
-dependencies = [
- "libsys",
-]
-
-[[package]]
-name = "spina"
-version = "0.1.0"
-dependencies = [
- "libsys",
-]
-
-[[package]]
-name = "spinb"
 version = "0.1.0"
 dependencies = [
  "libsys",

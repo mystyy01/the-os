@@ -9,6 +9,7 @@ SECTIONS {
 
     .text   : { *(.text .text.*) }          :load
     .rodata : { *(.rodata .rodata.*) }       :load
+    .got    : { *(.got) *(.got.plt) }        :load
     .data   : { *(.data .data.*) }           :load
     .bss    : { *(.bss .bss.*) *(COMMON) }   :load
 

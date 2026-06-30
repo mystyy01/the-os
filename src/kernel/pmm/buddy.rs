@@ -2,6 +2,8 @@ use core::ptr::{null, null_mut};
 
 use crate::pmm::MAX_ORDER;
 use crate::pmm::PAGE_SIZE;
+use crate::pmm::lock;
+use crate::pmm::unlock;
 use crate::vmm;
 
 #[repr(C)]
@@ -34,7 +36,7 @@ fn free_page(addr: u64, order: usize) -> () {
     }
 }
 
-pub fn alloc_pages(order: usize) -> *mut u8 {
+pub fn alloc_pages_inner(order: usize) -> *mut u8 {
     unsafe {
         if !BUDDY.free_lists[order].is_null() {
             let free_block = BUDDY.free_lists[order];
@@ -47,17 +49,23 @@ pub fn alloc_pages(order: usize) -> *mut u8 {
         if order + 1 >= MAX_ORDER {
             return null_mut();
         }
-        let block = alloc_pages(order + 1);
+        let block = alloc_pages_inner(order + 1);
         if block.is_null() {
             return null_mut();
         }
         free_page(block as u64 + (PAGE_SIZE << order), order);
-
         return block;
     }
 }
 
-pub fn free_pages(order: usize, addr: u64) -> () {
+pub fn alloc_pages(order: usize) -> *mut u8 {
+    lock();
+    let r = alloc_pages_inner(order);
+    unlock();
+    r
+}
+
+pub fn free_pages_inner(order: usize, addr: u64) -> () {
     let mut current_addr = addr;
     let mut current_order = order;
     unsafe {
@@ -86,6 +94,12 @@ pub fn free_pages(order: usize, addr: u64) -> () {
             current_order += 1;
         }
     }
+}
+
+pub fn free_pages(order: usize, addr: u64) {
+    lock();
+    free_pages_inner(order, addr);
+    unlock();
 }
 
 fn add_region(base: u64, size: u64) -> () {

@@ -1,4 +1,7 @@
+use crate::cpu;
+use crate::lapic;
 use crate::pit;
+use crate::scheduler;
 
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
@@ -43,6 +46,7 @@ unsafe extern "C" {
     fn isr_14();
     fn isr_32();
     fn isr_33();
+    fn isr_64();
 }
 #[repr(C, packed)]
 struct IDTR {
@@ -58,6 +62,7 @@ pub fn init() {
         IDT[14] = make_entry(isr_14 as *const () as u64);
         IDT[32] = make_entry(isr_32 as *const () as u64);
         IDT[33] = make_entry(isr_33 as *const () as u64);
+        IDT[64] = make_entry(isr_64 as *const () as u64);
 
         let idtr: IDTR = IDTR {
             limit: (256 * 16 - 1) as u16,
@@ -77,6 +82,16 @@ extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
     if vector == 33 {
         crate::io::outb(0x20, 0x20);
         crate::irq::dispatch(1);
+        return;
+    }
+    if vector == 64 {
+        lapic::eoi();
+        unsafe {
+            if cpu::current_task_opt().is_none() {
+                return;
+            }
+        }
+        scheduler::yield_now();
         return;
     }
     if vector == 14 {
@@ -157,6 +172,13 @@ extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
     crate::serial::write_hex(vector);
     crate::serial::write_str(" error_code=");
     crate::serial::write_hex(error_code);
-    // idk what next just wait ig
+    unsafe {
+        let rip = *frame.add(17);
+        crate::serial::write_str(" rip=");
+        crate::serial::write_hex(rip);
+        crate::serial::write_str(" cpu=");
+        crate::serial::write_hex(crate::lapic::id() as u64);
+        crate::serial::write_str("\n");
+    }
     loop {}
 }

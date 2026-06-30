@@ -1,7 +1,7 @@
 # Userspace workspace. All the-os user programs live here as members and share
 # one toolchain config (.cargo/config.toml) and one linker script (linker.ld).
 # Layout by role: init/ (pid 1 trust root), services/ (vfs + fs backends),
-# drivers/ (device drivers), examples/ (test/demo progs), libsys/ (shared lib).
+# drivers/ (device drivers), libsys/ (shared lib).
 # Add a new program: create the crate dir under the right role, add it to
 # `members`, add one line to the Makefile's `user` target.
 [workspace]
@@ -10,12 +10,10 @@ members = [
     "libsys",
     "init",
     "services/vfs",
+    "services/fs",
     "drivers/kb_driver",
+    "drivers/ata_pio_driver",
     "shell",
-    "examples/hello",
-    "examples/goodbye",
-    "examples/spina",
-    "examples/spinb",
 ]
 
 [profile.dev]

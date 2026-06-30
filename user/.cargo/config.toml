@@ -11,3 +11,7 @@ rustflags = [
     "-C", "link-arg=-no-pie",
     "-C", "link-arg=-Tlinker.ld",
 ]
+
+[target.x86_64-unknown-none.lwext4]
+rustc-link-lib = ["static=lwext4"]
+rustc-link-search = ["native=../build/lwext4/src"]

@@ -1,5 +1,5 @@
 [package]
-name = "spinb"
+name = "ata_pio_driver"
 version = "0.1.0"
 edition = "2024"
 

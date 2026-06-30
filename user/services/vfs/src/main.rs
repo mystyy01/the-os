@@ -47,18 +47,23 @@ fn bind(pid: i32, path: &[u8]) -> i32 {
 }
 
 fn resolve(path: &[u8]) -> i32 {
+    let mut best: i32 = -1;
+    let mut best_len: usize = 0;
     unsafe {
         for binding in VFS_BINDINGS {
-            if binding.used == false {
+            if !binding.used {
                 continue;
             }
-            if &binding.path[..binding.path_len] == &path[..path.len()] {
-                // we found the pid you want bro
-                return binding.endpoint;
+            let bpath = &binding.path[..binding.path_len];
+            if path.len() >= bpath.len() && &path[..bpath.len()] == bpath {
+                if binding.path_len >= best_len {
+                    best = binding.endpoint;
+                    best_len = binding.path_len;
+                }
             }
         }
     }
-    return -1;
+    best
 }
 
 fn on_bind(req: &IPCMessage, reply: &mut IPCMessage) {
