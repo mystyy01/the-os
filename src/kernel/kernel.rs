@@ -119,6 +119,7 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
     }
     serial::write_str("init pmm\n");
     pmm::init(multiboot2_info);
+    ipc::init();
     pic::init();
     lapic::init();
     lapic::init_timer();

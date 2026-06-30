@@ -61,6 +61,35 @@ impl Default for IPCConnection {
     }
 }
 
+pub const ARENA_VADDR: u64 = 0x5000_0000;
+pub const ARENA_PAGES: u64 = 16;
+pub static mut ARENA_PHYS: u64 = 0;
+
+pub fn init() {
+    unsafe {
+        let phys = crate::pmm::alloc_pages(4) as u64; // order 4 = 16 contiguous pages
+        core::ptr::write_bytes(
+            crate::vmm::phys_to_virt(phys) as *mut u8,
+            0,
+            (ARENA_PAGES * 4096) as usize,
+        );
+        ARENA_PHYS = phys;
+    }
+}
+
+pub fn map_arena(pml4: *mut u64) {
+    unsafe {
+        for i in 0..ARENA_PAGES {
+            crate::vmm::map_page(
+                pml4,
+                ARENA_VADDR + i * 0x1000,
+                ARENA_PHYS + i * 0x1000,
+                0x07,
+            );
+        }
+    }
+}
+
 pub fn alloc_msg() -> i32 {
     for i in 0..IPC_POOL_SIZE {
         unsafe {

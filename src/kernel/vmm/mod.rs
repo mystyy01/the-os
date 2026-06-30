@@ -1,5 +1,5 @@
 use crate::pmm::{alloc_pages, free_pages};
-use crate::serial;
+use crate::{ipc, serial};
 
 pub const HHDM_BASE: u64 = 0xFFFF800000000000;
 
@@ -32,6 +32,8 @@ pub unsafe fn create_address_space() -> *mut u64 {
         let boot_pml4 = phys_to_virt(&raw const PML4 as u64) as *mut u64;
         *pml4_virt.add(256) = *boot_pml4.add(256);
         *pml4_virt.add(511) = *boot_pml4.add(511);
+
+        ipc::map_arena(pml4 as *mut u64);
 
         return pml4 as *mut u64;
     }

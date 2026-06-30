@@ -6,6 +6,7 @@ use libsys::{IPC_MESSAGE_SIZE, IPCMessage, print, spawn, syscall, vfs_bind, vfs_
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
     unsafe {
+        *(0x5000_0000 as *mut u64) = 0xDEADBEEF;
         // start vfs here (HAS TO BE == VFS_PID in the libsys file i think)
         let vfs = include_bytes!("../../dist/vfs.elf");
         let vfs_pid = spawn(vfs, 1);
