@@ -10,6 +10,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bench"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
+name = "echo"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
 name = "fs"
 version = "0.1.0"
 dependencies = [

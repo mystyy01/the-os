@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use libsys::{OP_IRQ, OP_READ, SVC_KBD, inb, register, serve, syscall};
+use libsys::{OP_IRQ, OP_READ, SVC_KBD, irq_pop, register, serve, syscall};
 
 const SET1: [u8; 0x3A] = [
     0, 0, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'=', 0x08, 0x09, b'q',
@@ -64,19 +64,20 @@ fn on_read(_req: &[u8], reply: &mut [u8]) -> usize {
 }
 
 fn on_irq(_req: &[u8], _reply: &mut [u8]) -> usize {
-    let sc = unsafe { inb(0x60) };
-    let down = (sc & 0x80) == 0;
-    let code = (sc & 0x7F) as usize;
-    let val = if code < SET1.len() { SET1[code] } else { 0 };
-    if val != 0 {
-        buf_push(KBEvent {
-            val,
-            state: if down {
-                KBButtonState::Press
-            } else {
-                KBButtonState::Release
-            },
-        });
+    while let Some(sc) = irq_pop(1) {
+        let down = (sc & 0x80) == 0;
+        let code = (sc & 0x7F) as usize;
+        let val = if code < SET1.len() { SET1[code] } else { 0 };
+        if val != 0 {
+            buf_push(KBEvent {
+                val,
+                state: if down {
+                    KBButtonState::Press
+                } else {
+                    KBButtonState::Release
+                },
+            });
+        }
     }
     0
 }
@@ -85,7 +86,7 @@ fn on_irq(_req: &[u8], _reply: &mut [u8]) -> usize {
 unsafe extern "C" fn _start() -> ! {
     unsafe {
         // register for keyboard shit
-        syscall(10, 1, 0, 0, 0);
+        syscall(10, 1, SVC_KBD as u64, 0, 0);
     }
 
     register(OP_IRQ, on_irq);

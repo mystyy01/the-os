@@ -2,6 +2,8 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use crate::{
     heap::KernelHeap,
     idle::setup_idle,
@@ -19,6 +21,8 @@ fn alloc_error(_: core::alloc::Layout) -> ! {
 
 static mut KSP_A: u64 = 0;
 static mut KSP_B: u64 = 0;
+
+static AP_READY: AtomicU32 = AtomicU32::new(0);
 
 mod cpu;
 mod elf;
@@ -81,6 +85,8 @@ extern "C" fn ap_main() -> ! {
     let ap_stack_top: u64;
     unsafe { core::arch::asm!("mov {}, rsp", out(reg) ap_stack_top) };
 
+    AP_READY.store(1, Ordering::SeqCst);
+
     serial::write_str("AP: lapic init\n");
     lapic::init();
     lapic::init_timer();
@@ -132,20 +138,36 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
         core::arch::asm!("mov {}, cr3", out(reg) cr3);
         *(vmm::phys_to_virt(0x8FF0) as *mut u32) = cr3 as u32;
 
-        let ap_stack = pmm::alloc_pages(2) as u64 + 4 * 4096;
-        *(vmm::phys_to_virt(0x8FF8) as *mut u64) = vmm::phys_to_virt(ap_stack);
-
         *(vmm::phys_to_virt(0x9000) as *mut u64) = ap_main as u64;
 
-        lapic::send_init(1);
-        for _ in 0..10_000_000u64 {
-            core::hint::spin_loop();
+        for id in 1..8u8 {
+            AP_READY.store(0, Ordering::SeqCst);
+
+            let ap_stack = pmm::alloc_pages(2) as u64 + 4 * 4096;
+            *(vmm::phys_to_virt(0x8FF8) as *mut u64) = vmm::phys_to_virt(ap_stack);
+
+            lapic::send_init(id);
+            for _ in 0..1_000_000u64 {
+                core::hint::spin_loop();
+            }
+            lapic::send_sipi(id, 0x08);
+            for _ in 0..100_000u64 {
+                core::hint::spin_loop();
+            }
+            lapic::send_sipi(id, 0x08);
+
+            let mut up = false;
+            for _ in 0..20_000_000u64 {
+                if AP_READY.load(Ordering::SeqCst) != 0 {
+                    up = true;
+                    break;
+                }
+                core::hint::spin_loop();
+            }
+            if !up {
+                break;
+            }
         }
-        lapic::send_sipi(1, 0x08);
-        for _ in 0..1_000_000u64 {
-            core::hint::spin_loop();
-        }
-        lapic::send_sipi(1, 0x08);
     }
     unsafe { core::arch::asm!("sti") }
     serial::write_str("Entering user space\n");

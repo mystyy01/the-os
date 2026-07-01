@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use libsys::{SVC_KBD, print, spawn, vfs_bind, vfs_resolve};
+use libsys::{SVC_KBD, print, spawn, syscall, vfs_bind, vfs_resolve};
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
@@ -21,5 +21,15 @@ unsafe extern "C" fn _start() -> ! {
 
     let shell = include_bytes!("../../dist/shell.elf");
     spawn(shell, 0);
-    loop {}
+
+    let echo = include_bytes!("../../dist/echo.elf");
+    spawn(echo, 2);
+    let bench = include_bytes!("../../dist/bench.elf");
+    spawn(bench, 3);
+
+    loop {
+        unsafe {
+            syscall(9, 0, 0, 0, 0);
+        }
+    }
 }

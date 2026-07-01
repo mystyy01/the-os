@@ -91,6 +91,9 @@ extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
                 return;
             }
         }
+        if scheduler::try_direct_wake() {
+            return;
+        }
         scheduler::yield_now();
         return;
     }

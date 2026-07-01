@@ -21,11 +21,16 @@ pub fn init() {
 pub fn init_timer() {
     write(0x3E0, 0x3);
     write(0x320, 0x40 | (1 << 17));
-    write(0x380, 10_000_000);
+    write(0x380, 100_000);
 }
 
 pub fn eoi() {
     write(0x0B0, 0);
+}
+
+pub fn send_ipi(apic_id: u8, vector: u8) {
+    write(0x310, (apic_id as u32) << 24);
+    write(0x300, 0x00004000 | vector as u32);
 }
 
 pub fn id() -> u8 {
@@ -34,10 +39,10 @@ pub fn id() -> u8 {
 
 pub fn send_init(apic_id: u8) {
     write(0x310, (apic_id as u32) << 24);
-    write(0x300, 0x000C4500)
+    write(0x300, 0x00004500)
 }
 
 pub fn send_sipi(apic_id: u8, vector: u8) {
     write(0x310, (apic_id as u32) << 24);
-    write(0x300, 0x000C4600 | vector as u32);
+    write(0x300, 0x00004600 | vector as u32);
 }

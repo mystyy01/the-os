@@ -31,7 +31,7 @@ define build_user
 	printf '\xae' | dd of=$(USER_DIST)/$(1).elf bs=1 seek=7 count=1 conv=notrunc status=none
 endef
 
-.PHONY: all clean run rust user lwext4
+.PHONY: all clean run run-debug rust user lwext4
 
 all: $(ISO)
 
@@ -60,6 +60,8 @@ user: $(LWEXT4_LIB)
 	$(call build_user,shell)
 	$(call build_user,ata_pio_driver)
 	$(call build_user,fs)
+	$(call build_user,echo)
+	$(call build_user,bench)
 	$(call build_user,the-initializer)
 
 rust: user
@@ -82,8 +84,16 @@ $(FSROOT)/hello.txt:
 	mkdir -p $(FSROOT)
 	printf 'hello from ext4!\n' > $(FSROOT)/hello.txt
 
+QEMU = qemu-system-x86_64
+QEMU_SMP = 4,sockets=1,cores=4,threads=1
+QEMU_MEM = 8G
+QEMU_BASE = -cdrom $(ISO) -serial stdio -drive file=disk.img,format=raw,if=ide
+
 run: $(ISO) disk.img
-	qemu-system-x86_64 -smp 2 -cdrom $(ISO) -serial stdio -drive file=disk.img,format=raw,if=ide
+	$(QEMU) -enable-kvm -cpu host -smp $(QEMU_SMP) -m $(QEMU_MEM) $(QEMU_BASE)
+
+run-debug: $(ISO) disk.img
+	$(QEMU) -cpu qemu64 -smp $(QEMU_SMP) -m $(QEMU_MEM) $(QEMU_BASE) -no-reboot -no-shutdown -s -S
 
 clean:
 	rm -rf $(BUILD_DIR) $(KERNEL_BIN) $(ISO) $(USER_DIST)

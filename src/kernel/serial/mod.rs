@@ -1,5 +1,16 @@
 use crate::io::inb;
 use crate::io::outb;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+static SERIAL_LOCK: AtomicBool = AtomicBool::new(false);
+
+pub fn lock() {
+    while SERIAL_LOCK.swap(true, Ordering::Acquire) {}
+}
+
+pub fn unlock() {
+    SERIAL_LOCK.store(false, Ordering::Release);
+}
 
 pub fn init() {
     outb(0x3F8 + 1, 0x00); // this is interrups disable

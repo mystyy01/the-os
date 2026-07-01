@@ -250,13 +250,15 @@ section .boot.text
     pop rbp
     ret 
   user_entry_bouncy_trampoline_lol:
-    push 0x1b
-    push r14
-    push 0x3202
-    push 0x23
-    push r15
-    swapgs
-    iretq
+      cli
+      push 0x1b
+      push r14
+      push 0x3202
+      push 0x23
+      push r15
+      swapgs
+      iretq
+
   syscall_entry:
     swapgs
     mov gs:[8], rsp

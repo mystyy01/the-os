@@ -23,7 +23,7 @@ pub unsafe fn init() {
         wrmsr(efer_num, efer | 1);
 
         // star
-        wrmsr(0xC0000081u32, (0x0008u64 << 32) | (0x0010u64 << 48));
+        wrmsr(0xC0000081u32, (0x0008u64 << 32) | (0x0013u64 << 48));
 
         // lstar
         wrmsr(0xC0000082u32, syscall_entry as u64);
@@ -154,9 +154,11 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             // print for debugging - goes thru serial
             let bytes = unsafe { core::slice::from_raw_parts(arg1 as *const u8, arg2 as usize) };
 
+            serial::lock();
             for byte in bytes {
                 serial::write_byte(*byte);
             }
+            serial::unlock();
 
             return 0;
         }
@@ -169,9 +171,8 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
         }
         10 => {
             // register an irq reader
-            // arg1 = irq number
-            let pid = unsafe { (*cpu::get_current_task()).pid };
-            irq::register(arg1 as usize, pid);
+            // arg1 = irq number, arg2 = service_id
+            irq::register(arg1 as usize, arg2 as u32);
             return 0;
         }
         11 => unsafe {
@@ -269,6 +270,23 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             // get self pid
             return (*cpu::get_current_task()).pid as u64;
         },
+        16 => unsafe {
+            // block: server has no work. arg1 = service_id
+            let svc = arg1 as u32;
+            let pid = (*cpu::get_current_task()).pid;
+            let core = crate::lapic::id() as u32;
+            crate::ipc::register_server(svc, pid, core);
+            if crate::ipc::inbox_has_req(svc) {
+                return 0;
+            }
+            scheduler::block_current();
+            return 0;
+        },
+        17 => {
+            // notify: wake the server for arg1 = service_id
+            crate::ipc::wake_server(arg1 as u32);
+            return 0;
+        }
         _ => u64::MAX,
     }
 }

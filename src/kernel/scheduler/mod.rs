@@ -1,4 +1,5 @@
 use core::ptr::null_mut;
+use core::sync::atomic::{AtomicPtr, Ordering, fence};
 
 const KSTACK_ORDER: usize = 4;
 const KSTACK_SIZE: u64 = 4096 << KSTACK_ORDER;
@@ -7,7 +8,7 @@ use crate::{
     cpu::{get_current_task, set_current_task, set_stack_top},
     gdt,
     ipc::{IPCConnection, MAX_IPC_CONNECTIONS_PER_TASK},
-    lapic, pmm, serial,
+    pmm, serial,
 };
 
 unsafe extern "C" {
@@ -27,6 +28,7 @@ pub enum TaskState {
 pub struct Task {
     pub priority: u8,
     pub state: TaskState,
+    pub wake_pending: bool,
     pub stack: *mut u8,
     pub ksp: u64,
     pub kstack_top: u64,
@@ -106,7 +108,7 @@ pub fn find_ipc_waiting(pid: i32) -> *mut Task {
 }
 unsafe fn find_next_task() -> Option<*mut Task> {
     unsafe {
-        let s = &mut SCHEDULERS[lapic::id() as usize];
+        let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for priority in (0..PRIORITY_LEVELS).rev() {
             for i in 0..MAX_TASKS_PER_PRIORITY {
                 let slot = (s.current_slot[priority] + i + 1) % MAX_TASKS_PER_PRIORITY;
@@ -143,6 +145,12 @@ pub fn block_current() {
     unsafe {
         let prev = get_current_task();
         (*prev).state = TaskState::Blocked;
+        fence(Ordering::SeqCst);
+        if core::ptr::read_volatile(&(*prev).wake_pending) {
+            core::ptr::write_volatile(&mut (*prev).wake_pending, false);
+            (*prev).state = TaskState::Ready;
+            return;
+        }
         if let Some(next) = find_next_task() {
             if next == prev {
                 return;
@@ -158,12 +166,48 @@ pub fn block_current() {
     }
 }
 
+static WAKE_HINTS: [AtomicPtr<Task>; MAX_CPUS] =
+    [const { AtomicPtr::new(null_mut()) }; MAX_CPUS];
+
+pub fn set_wake_hint(core: usize, task: *mut Task) {
+    if core < MAX_CPUS {
+        WAKE_HINTS[core].store(task, Ordering::Release);
+    }
+}
+
+pub fn try_direct_wake() -> bool {
+    unsafe {
+        let hint = WAKE_HINTS[crate::cpu::id() as usize].swap(null_mut(), Ordering::AcqRel);
+        if hint.is_null() {
+            return false;
+        }
+        if (*hint).state != TaskState::Ready {
+            return false;
+        }
+        let prev = get_current_task();
+        if hint == prev {
+            return true;
+        }
+        set_current_task(Some(hint));
+
+        core::arch::asm!("mov cr3, {}", in(reg) (*hint).cr3, options(nostack));
+        set_stack_top((*hint).kstack_top);
+        gdt::set_rsp0((*hint).kstack_top);
+
+        switch_to(&raw mut (*prev).ksp, (*hint).ksp);
+        return true;
+    }
+}
+
 pub fn wake(task: Option<*mut Task>) {
     unsafe {
         if task.is_none() {
             return;
         }
-        (*task.unwrap()).state = TaskState::Ready;
+        let t = task.unwrap();
+        core::ptr::write_volatile(&mut (*t).wake_pending, true);
+        fence(Ordering::SeqCst);
+        (*t).state = TaskState::Ready;
     }
 }
 
@@ -185,6 +229,7 @@ pub fn spawn_task(entry: fn(), priority: u8) {
         core::arch::asm!("mov {}, cr3", out(reg) cr3);
         let task = Task {
             state: TaskState::Ready,
+            wake_pending: false,
             priority: priority,
             stack: stack,
             ksp: ksp,
@@ -193,7 +238,7 @@ pub fn spawn_task(entry: fn(), priority: u8) {
             pid: next_pid(),
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
         };
-        let s = &mut SCHEDULERS[lapic::id() as usize];
+        let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for (i, t) in s.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
                 s.queues[priority as usize][i] = Some(task);
@@ -223,6 +268,7 @@ pub fn spawn_idle(entry: fn()) {
         core::arch::asm!("mov {}, cr3", out(reg) cr3);
         let task = Task {
             state: TaskState::Ready,
+            wake_pending: false,
             priority: 0,
             stack: stack,
             ksp: ksp,
@@ -231,7 +277,7 @@ pub fn spawn_idle(entry: fn()) {
             pid: IDLE_PID,
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
         };
-        let s = &mut SCHEDULERS[lapic::id() as usize];
+        let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for (i, t) in s.queues[0 as usize].iter().enumerate() {
             if t.is_none() {
                 s.queues[0 as usize][i] = Some(task);
@@ -259,6 +305,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8, 
 
         let task = Task {
             state: TaskState::Ready,
+            wake_pending: false,
             priority: priority,
             stack: null_mut(),
             ksp: ksp,
@@ -281,7 +328,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8, 
 
 pub unsafe fn start() {
     unsafe {
-        let s = &mut SCHEDULERS[lapic::id() as usize];
+        let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for priority in (0..PRIORITY_LEVELS).rev() {
             for slot in 0..MAX_TASKS_PER_PRIORITY {
                 if s.queues[priority][slot].is_some()
@@ -296,7 +343,7 @@ pub unsafe fn start() {
                     gdt::set_rsp0((*first).kstack_top);
 
                     let mut dummy = 0u64;
-                    core::arch::asm!("swapgs");
+                    // core::arch::asm!("swapgs");
                     switch_to(&raw mut dummy, (*first).ksp);
                     return;
                 }
@@ -307,7 +354,7 @@ pub unsafe fn start() {
 
 pub unsafe fn kill_current_task() {
     unsafe {
-        let s = &mut SCHEDULERS[lapic::id() as usize];
+        let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for priority in (0..PRIORITY_LEVELS).rev() {
             for i in 0..MAX_TASKS_PER_PRIORITY {
                 let slot = (s.current_slot[priority] + i) % MAX_TASKS_PER_PRIORITY;

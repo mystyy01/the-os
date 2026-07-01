@@ -48,6 +48,12 @@ unsafe fn current() -> *mut CPULocal {
     unsafe { rdmsr(0xC0000101) as *mut CPULocal }
 }
 
+pub unsafe fn id() -> u32 {
+    unsafe {
+        return (*current()).cpu_id;
+    }
+}
+
 pub unsafe fn set_current_task(task: Option<*mut Task>) {
     unsafe {
         (*current()).current_task = task;
