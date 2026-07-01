@@ -3,7 +3,7 @@
 
 use libsys::{
     OP_ECHO, OP_ECHO_TS, PP_BASE, PP_ITERS, PP_WARMUP, SVC_ECHO, mbox_call, mbox_call_prof,
-    mbox_call_spin, mbox_connect, print, rdtsc,
+    mbox_call_spin, mbox_connect, print, rdtsc, set_direct_wake,
 };
 
 const WARMUP: u64 = 256;
@@ -127,7 +127,9 @@ fn staged(idx: usize) {
     let mut rt = 0u64;
     for _ in 0..ITERS {
         let (t1, t4) = mbox_call_prof(idx, &req[..16], out);
-        let t2 = u64::from_le_bytes([out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7]]);
+        let t2 = u64::from_le_bytes([
+            out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
+        ]);
         let t3 = u64::from_le_bytes([
             out[8], out[9], out[10], out[11], out[12], out[13], out[14], out[15],
         ]);
@@ -147,6 +149,41 @@ fn staged(idx: usize) {
     print("\n");
 }
 
+fn delay_cycles(n: u64) {
+    let start = rdtsc();
+    while rdtsc() - start < n {
+        core::hint::spin_loop();
+    }
+}
+
+fn cold(idx: usize, label: &str) {
+    const TRIALS: u64 = 50;
+    const GAP: u64 = 5_000_000;
+
+    let req = unsafe { &mut *core::ptr::addr_of_mut!(REQ) };
+    let out = unsafe { &mut *core::ptr::addr_of_mut!(OUT) };
+    req[0] = OP_ECHO;
+
+    let mut min = u64::MAX;
+    let mut sum = 0u64;
+    for _ in 0..TRIALS {
+        delay_cycles(GAP);
+        let t0 = rdtsc();
+        mbox_call_spin(idx, &req[..8], out);
+        let t1 = rdtsc();
+        let d = t1 - t0;
+        if d < min {
+            min = d;
+        }
+        sum += d;
+    }
+
+    print(label);
+    kv("  min=", min);
+    kv(" avg=", sum / TRIALS);
+    print("\n");
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
     print("bench: up\n");
@@ -162,6 +199,10 @@ unsafe extern "C" fn _start() -> ! {
     row("512B  yield", idx, mbox_call, 512);
     row("4096B busy ", idx, mbox_call_spin, 4096);
     row("4096B yield", idx, mbox_call, 4096);
+    cold(idx, "--- cold A: directed wake ---\n");
+    set_direct_wake(false);
+    cold(idx, "--- cold B: scheduler lap ---\n");
+    set_direct_wake(true);
     print("=== bench done ===\n");
 
     loop {}

@@ -1,3 +1,6 @@
+use crate::cpu;
+use crate::ipc;
+use crate::vmm;
 use core::ptr::null_mut;
 use core::sync::atomic::{AtomicPtr, Ordering, fence};
 
@@ -166,8 +169,13 @@ pub fn block_current() {
     }
 }
 
-static WAKE_HINTS: [AtomicPtr<Task>; MAX_CPUS] =
-    [const { AtomicPtr::new(null_mut()) }; MAX_CPUS];
+static WAKE_HINTS: [AtomicPtr<Task>; MAX_CPUS] = [const { AtomicPtr::new(null_mut()) }; MAX_CPUS];
+
+static DIRECT_WAKE_ON: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+
+pub fn set_direct_wake(on: bool) {
+    DIRECT_WAKE_ON.store(on, Ordering::Relaxed);
+}
 
 pub fn set_wake_hint(core: usize, task: *mut Task) {
     if core < MAX_CPUS {
@@ -179,6 +187,9 @@ pub fn try_direct_wake() -> bool {
     unsafe {
         let hint = WAKE_HINTS[crate::cpu::id() as usize].swap(null_mut(), Ordering::AcqRel);
         if hint.is_null() {
+            return false;
+        }
+        if !DIRECT_WAKE_ON.load(Ordering::Relaxed) {
             return false;
         }
         if (*hint).state != TaskState::Ready {
@@ -212,10 +223,9 @@ pub fn wake(task: Option<*mut Task>) {
 }
 
 pub fn spawn_task(entry: fn(), priority: u8) {
-    let stack = crate::pmm::alloc_pages(KSTACK_ORDER) as *mut u8;
     unsafe {
         let kstack_phys = pmm::alloc_pages(KSTACK_ORDER) as u64;
-        let top = (crate::vmm::phys_to_virt(kstack_phys) + 8192) as *mut u64;
+        let top = (crate::vmm::phys_to_virt(kstack_phys) + KSTACK_SIZE) as *mut u64;
         *top.sub(1) = entry as u64; // ret lands here
         *top.sub(2) = 0;
         *top.sub(3) = 0;
@@ -231,7 +241,7 @@ pub fn spawn_task(entry: fn(), priority: u8) {
             state: TaskState::Ready,
             wake_pending: false,
             priority: priority,
-            stack: stack,
+            stack: kstack_phys as *mut u8,
             ksp: ksp,
             kstack_top: top as u64,
             cr3: cr3,
@@ -251,10 +261,9 @@ pub fn spawn_task(entry: fn(), priority: u8) {
 static mut IDLE_PID: i32 = -1;
 
 pub fn spawn_idle(entry: fn()) {
-    let stack = crate::pmm::alloc_pages(KSTACK_ORDER) as *mut u8;
     unsafe {
         let kstack_phys = pmm::alloc_pages(KSTACK_ORDER) as u64;
-        let top = (crate::vmm::phys_to_virt(kstack_phys) + 8192) as *mut u64;
+        let top = (crate::vmm::phys_to_virt(kstack_phys) + KSTACK_SIZE) as *mut u64;
         *top.sub(1) = entry as u64;
         *top.sub(2) = 0;
         *top.sub(3) = 0;
@@ -270,7 +279,7 @@ pub fn spawn_idle(entry: fn()) {
             state: TaskState::Ready,
             wake_pending: false,
             priority: 0,
-            stack: stack,
+            stack: kstack_phys as *mut u8,
             ksp: ksp,
             kstack_top: top as u64,
             cr3: cr3,
@@ -289,10 +298,9 @@ pub fn spawn_idle(entry: fn()) {
 }
 
 pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8, cpu_id: u8) -> i32 {
-    let stack = crate::pmm::alloc_pages(KSTACK_ORDER) as *mut u8;
     unsafe {
         let kstack_phys = pmm::alloc_pages(KSTACK_ORDER) as u64;
-        let top = (crate::vmm::phys_to_virt(kstack_phys) + 8192) as *mut u64;
+        let top = (crate::vmm::phys_to_virt(kstack_phys) + KSTACK_SIZE) as *mut u64;
 
         *top.sub(1) = user_entry_bouncy_trampoline_lol as u64;
         *top.sub(2) = 0;
@@ -307,7 +315,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8, 
             state: TaskState::Ready,
             wake_pending: false,
             priority: priority,
-            stack: null_mut(),
+            stack: kstack_phys as *mut u8,
             ksp: ksp,
             kstack_top: top as u64,
             cr3: cr3,
@@ -352,14 +360,14 @@ pub unsafe fn start() {
     }
 }
 
-pub unsafe fn kill_current_task() {
+pub unsafe fn kill_task(task: *mut Task) {
     unsafe {
         let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for priority in (0..PRIORITY_LEVELS).rev() {
             for i in 0..MAX_TASKS_PER_PRIORITY {
                 let slot = (s.current_slot[priority] + i) % MAX_TASKS_PER_PRIORITY;
                 if s.queues[priority][slot].is_some()
-                    && s.queues[priority][slot].as_mut().unwrap() as *mut Task == get_current_task()
+                    && s.queues[priority][slot].as_mut().unwrap() as *mut Task == task
                 {
                     s.queues[priority][slot] = None;
                     break;
@@ -376,5 +384,31 @@ pub unsafe fn kill_current_task() {
             let mut dummy = 0u64;
             switch_to(&raw mut dummy, (*next).ksp);
         }
+    }
+}
+
+pub unsafe fn kill_current_task() {
+    unsafe {
+        kill_task(get_current_task());
+    }
+}
+
+pub unsafe fn cleanup_and_exit_task(task: *mut Task) {
+    unsafe {
+        core::arch::asm!("mov cr3, {}", in(reg) cpu::get_kernel_cr3());
+        vmm::free_table((*task).cr3, 4);
+        if !(*task).stack.is_null() {
+            pmm::free_pages(KSTACK_ORDER, (*task).stack as u64);
+        }
+
+        for con in (*task).ipc_con {
+            if con.is_some() {
+                ipc::free_msg(con.unwrap().ipc_pool_idx);
+            }
+        }
+
+        ipc::release_server_by_pid((*task).pid);
+
+        kill_task(task);
     }
 }

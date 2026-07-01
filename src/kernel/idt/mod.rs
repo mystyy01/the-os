@@ -1,7 +1,10 @@
 use crate::cpu;
 use crate::lapic;
 use crate::pit;
+use crate::pmm;
 use crate::scheduler;
+use crate::scheduler::cleanup_and_exit_task;
+use crate::vmm;
 
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
@@ -96,6 +99,19 @@ extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
         }
         scheduler::yield_now();
         return;
+    }
+    unsafe {
+        if *frame.add(18) & 3 == 3 {
+            // the error is from ring 3 so basically its someones bad code (not mine my code is the best)
+            let curr_task = cpu::get_current_task();
+            crate::serial::write_str("pid: ");
+            crate::serial::write_hex((*curr_task).pid as u64);
+            crate::serial::write_str(
+                " has crashed. i cba to put more details here so good job tryna find out why!\n",
+            );
+            cleanup_and_exit_task(curr_task);
+            return;
+        }
     }
     if vector == 14 {
         let cr2: u64;

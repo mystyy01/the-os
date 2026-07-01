@@ -24,8 +24,10 @@ static mut KSP_B: u64 = 0;
 
 static AP_READY: AtomicU32 = AtomicU32::new(0);
 
+mod acpi;
 mod cpu;
 mod elf;
+mod fb;
 mod gdt;
 mod heap;
 mod idle;
@@ -93,7 +95,7 @@ extern "C" fn ap_main() -> ! {
     serial::write_str("AP: idt init\n");
     idt::init();
     serial::write_str("AP: cpu init\n");
-    let id = lapic::id() as u32;
+    let id = unsafe { cpu::index_of(lapic::id()) };
     unsafe {
         cpu::init(id, ap_stack_top);
         serial::write_str("AP: gdt init\n");
@@ -113,6 +115,7 @@ extern "C" fn ap_main() -> ! {
 #[unsafe(no_mangle)]
 extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
     serial::init();
+    fb::init(multiboot2_info);
     serial::write_str("init idt\n");
     idt::init();
     serial::write_str("init gdt\n");
@@ -140,21 +143,58 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
 
         *(vmm::phys_to_virt(0x9000) as *mut u64) = ap_main as u64;
 
-        for id in 1..8u8 {
+        let bsp = lapic::id();
+        cpu::register_cpu(0, bsp);
+
+        let mut madt_ids = [0u8; 8];
+        let found = acpi::lapic_ids(multiboot2_info, &mut madt_ids);
+
+        let mut candidates = [0u8; 8];
+        let mut n = 0;
+        if found == 0 {
+            let mut a = 1u8;
+            while a < 8 {
+                candidates[n] = a;
+                n += 1;
+                a += 1;
+            }
+        } else {
+            for pass in 0..2u8 {
+                for k in 0..found {
+                    let id = madt_ids[k];
+                    if id == bsp {
+                        continue;
+                    }
+                    if id % 2 == pass && n < 8 {
+                        candidates[n] = id;
+                        n += 1;
+                    }
+                }
+            }
+        }
+
+        let mut seq = 1u32;
+        let mut i = 0;
+        while i < n && seq < 8 {
+            let apic = candidates[i];
+            i += 1;
+
             AP_READY.store(0, Ordering::SeqCst);
 
             let ap_stack = pmm::alloc_pages(2) as u64 + 4 * 4096;
             *(vmm::phys_to_virt(0x8FF8) as *mut u64) = vmm::phys_to_virt(ap_stack);
 
-            lapic::send_init(id);
+            cpu::register_cpu(seq, apic);
+
+            lapic::send_init(apic);
             for _ in 0..1_000_000u64 {
                 core::hint::spin_loop();
             }
-            lapic::send_sipi(id, 0x08);
+            lapic::send_sipi(apic, 0x08);
             for _ in 0..100_000u64 {
                 core::hint::spin_loop();
             }
-            lapic::send_sipi(id, 0x08);
+            lapic::send_sipi(apic, 0x08);
 
             let mut up = false;
             for _ in 0..20_000_000u64 {
@@ -165,8 +205,9 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
                 core::hint::spin_loop();
             }
             if !up {
-                break;
+                serial::write_str("AP timeout\n");
             }
+            seq += 1;
         }
     }
     unsafe { core::arch::asm!("sti") }

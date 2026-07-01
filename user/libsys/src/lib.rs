@@ -182,6 +182,12 @@ pub fn block(service_id: u32) {
     }
 }
 
+pub fn set_direct_wake(on: bool) {
+    unsafe {
+        syscall(18, on as u64, 0, 0, 0);
+    }
+}
+
 pub fn notify(service_id: u32) {
     unsafe {
         syscall(17, service_id as u64, 0, 0, 0);

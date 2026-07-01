@@ -31,6 +31,31 @@ static mut CPU_LOCALS: [CPULocal; 8] = [CPULocal {
     current_task: None,
     cpu_id: 0,
 }; 8];
+static mut APIC_IDS: [u8; 8] = [0; 8];
+
+pub unsafe fn register_cpu(seq: u32, apic_id: u8) {
+    unsafe {
+        APIC_IDS[seq as usize] = apic_id;
+    }
+}
+
+pub unsafe fn apic_id_of(seq: u32) -> u8 {
+    unsafe {
+        return APIC_IDS[seq as usize];
+    }
+}
+
+pub unsafe fn index_of(apic_id: u8) -> u32 {
+    unsafe {
+        for i in 0..8 {
+            if APIC_IDS[i] == apic_id {
+                return i as u32;
+            }
+        }
+    }
+    return 0;
+}
+
 pub unsafe fn init(cpu_id: u32, kernel_stack_top: u64) {
     unsafe {
         let cr3: u64;

@@ -134,7 +134,7 @@ pub fn wake_server(service_id: u32) {
             wake(Some(t));
             scheduler::set_wake_hint(s.core as usize, t);
         }
-        crate::lapic::send_ipi(s.core as u8, 64);
+        crate::lapic::send_ipi(crate::cpu::apic_id_of(s.core), 64);
     }
 }
 
@@ -144,7 +144,9 @@ pub fn inbox_has_req(service_id: u32) -> bool {
     }
     unsafe {
         let base = crate::vmm::phys_to_virt(
-            ARENA_PHYS + INBOX_OFF as u64 + service_id as u64 * core::mem::size_of::<ServiceInbox>() as u64,
+            ARENA_PHYS
+                + INBOX_OFF as u64
+                + service_id as u64 * core::mem::size_of::<ServiceInbox>() as u64,
         );
         let ib = &*(base as *const ServiceInbox);
         let n = core::cmp::min(ib.count as usize, INBOX_CAP);
@@ -153,8 +155,8 @@ pub fn inbox_has_req(service_id: u32) -> bool {
             if mi >= MAX_MAILBOXES {
                 continue;
             }
-            let mb =
-                crate::vmm::phys_to_virt(ARENA_PHYS + MBOX_OFF as u64 + (mi * 64) as u64) as *const Mailbox;
+            let mb = crate::vmm::phys_to_virt(ARENA_PHYS + MBOX_OFF as u64 + (mi * 64) as u64)
+                as *const Mailbox;
             if core::ptr::read_volatile(&(*mb).status) == MBOX_REQ {
                 return true;
             }
@@ -169,7 +171,9 @@ pub fn inbox_add(service_id: u32, mbox_idx: u32) {
     }
     unsafe {
         let base = crate::vmm::phys_to_virt(
-            ARENA_PHYS + INBOX_OFF as u64 + service_id as u64 * core::mem::size_of::<ServiceInbox>() as u64,
+            ARENA_PHYS
+                + INBOX_OFF as u64
+                + service_id as u64 * core::mem::size_of::<ServiceInbox>() as u64,
         );
         let count = &*(base as *const core::sync::atomic::AtomicU32);
         let slot = count.fetch_add(1, Ordering::Relaxed) as usize;
@@ -368,6 +372,20 @@ pub fn recv_any(task: *mut Task, msg_out: *mut IPCMessage) -> i32 {
                 }
             }
             scheduler::block_current();
+        }
+    }
+}
+
+pub fn release_server_by_pid(pid: i32) {
+    unsafe {
+        for i in 0..MAX_SERVICES {
+            if SERVERS[i].used && SERVERS[i].pid == pid {
+                SERVERS[i] = ServerReg {
+                    pid: -1,
+                    core: 0,
+                    used: false,
+                };
+            }
         }
     }
 }

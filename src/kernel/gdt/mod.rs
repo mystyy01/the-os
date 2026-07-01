@@ -76,7 +76,7 @@ pub fn init(cpu_id: u32, kernel_stack_top: u64) {
 
 pub fn set_rsp0(top: u64) {
     unsafe {
-        let tss = core::ptr::addr_of_mut!(CPU_GDTS[lapic::id() as usize].tss);
+        let tss = core::ptr::addr_of_mut!(CPU_GDTS[crate::cpu::id() as usize].tss);
         let rsp0 = (tss as *mut u8).add(4) as *mut u64;
         core::ptr::write_unaligned(rsp0, top);
     }

@@ -5,7 +5,7 @@ use crate::{
     irq,
     msr::{rdmsr, wrmsr},
     pmm,
-    scheduler::{self, Task, TaskState, find_task_by_pid, yield_now},
+    scheduler::{self, Task, TaskState, cleanup_and_exit_task, find_task_by_pid, yield_now},
     serial, vmm,
 };
 
@@ -57,13 +57,7 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
         0 => {
             // exit
             unsafe {
-                let curr_task = *(cpu::get_current_task());
-                core::arch::asm!("mov cr3, {}", in(reg) cpu::get_kernel_cr3());
-                vmm::free_table(curr_task.cr3, 4);
-                if !curr_task.stack.is_null() {
-                    pmm::free_pages(0, curr_task.stack as u64);
-                }
-                scheduler::kill_current_task();
+                cleanup_and_exit_task(cpu::get_current_task());
             }
             return 0;
         }
@@ -271,10 +265,10 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             return (*cpu::get_current_task()).pid as u64;
         },
         16 => unsafe {
-            // block: server has no work. arg1 = service_id
+            // block: server has no work & arg1 = service_id
             let svc = arg1 as u32;
             let pid = (*cpu::get_current_task()).pid;
-            let core = crate::lapic::id() as u32;
+            let core = unsafe { cpu::id() };
             crate::ipc::register_server(svc, pid, core);
             if crate::ipc::inbox_has_req(svc) {
                 return 0;
@@ -283,8 +277,12 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             return 0;
         },
         17 => {
-            // notify: wake the server for arg1 = service_id
+            // notify wake the server for arg1 = service_id
             crate::ipc::wake_server(arg1 as u32);
+            return 0;
+        }
+        18 => {
+            scheduler::set_direct_wake(arg1 != 0);
             return 0;
         }
         _ => u64::MAX,
