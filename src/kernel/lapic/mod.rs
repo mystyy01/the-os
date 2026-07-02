@@ -1,3 +1,4 @@
+use crate::hpet;
 use crate::msr::rdmsr;
 use crate::vmm::phys_to_virt;
 
@@ -17,11 +18,22 @@ fn write(offset: usize, val: u32) {
 pub fn init() {
     write(0x0F0, read(0x0F0) | 0x1FF);
 }
+pub fn calibrate(target_hz: u32) -> u32 {
+    write(0x3E0, 0x3);
+    write(0x380, 0xFFFFFFFF);
+    let start = hpet::now_ns();
+    while hpet::now_ns() - start < 10_000_000 {}
+    let elapsed_ns = hpet::now_ns() - start;
+    let count = 0xFFFFFFFFu32 - read(0x390);
+    let ticks_per_sec = (count as u64 * 1_000_000_000) / elapsed_ns;
+    (ticks_per_sec / target_hz as u64) as u32
+}
 
 pub fn init_timer() {
     write(0x3E0, 0x3);
     write(0x320, 0x40 | (1 << 17));
-    write(0x380, 100_000);
+    let count = calibrate(100);
+    write(0x380, count);
 }
 
 pub fn eoi() {

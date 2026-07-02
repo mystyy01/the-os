@@ -59,14 +59,20 @@ pub fn write_byte(byte: u8) {
     }
 }
 
-pub fn write_str(s: &str) {
+pub fn write_str_raw(s: &str) {
     for byte in s.bytes() {
         write_byte(byte);
     }
 }
 
-pub fn write_hex(val: u64) {
-    write_str("0x");
+pub fn write_str(s: &str) {
+    lock();
+    write_str_raw(s);
+    unlock();
+}
+
+pub fn write_hex_raw(val: u64) {
+    write_str_raw("0x");
     for i in 0..16 {
         let nibble = (val >> ((15 - i) * 4)) & 0x0F;
         let byte = if nibble < 10 {
@@ -76,4 +82,10 @@ pub fn write_hex(val: u64) {
         };
         write_byte(byte);
     }
+}
+
+pub fn write_hex(val: u64) {
+    lock();
+    write_hex_raw(val);
+    unlock();
 }

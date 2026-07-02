@@ -30,6 +30,7 @@ mod elf;
 mod fb;
 mod gdt;
 mod heap;
+mod hpet;
 mod idle;
 mod idt;
 mod io;
@@ -47,12 +48,12 @@ mod vmm;
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    serial::write_str("PANIC\n");
+    serial::write_str_raw("PANIC\n");
     if let Some(loc) = _info.location() {
-        serial::write_str(loc.file());
-        serial::write_str("\n");
-        serial::write_hex(loc.line() as u64);
-        serial::write_str("\n");
+        serial::write_str_raw(loc.file());
+        serial::write_str_raw("\n");
+        serial::write_hex_raw(loc.line() as u64);
+        serial::write_str_raw("\n");
     }
     loop {}
 }
@@ -128,6 +129,9 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
     }
     serial::write_str("init pmm\n");
     pmm::init(multiboot2_info);
+
+    hpet::init(multiboot2_info);
+
     ipc::init();
     pic::init();
     lapic::init();
@@ -187,17 +191,20 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
             cpu::register_cpu(seq, apic);
 
             lapic::send_init(apic);
-            for _ in 0..1_000_000u64 {
+            let deadline = hpet::now_ns() + 10_000;
+            while hpet::now_ns() < deadline {
                 core::hint::spin_loop();
             }
             lapic::send_sipi(apic, 0x08);
-            for _ in 0..100_000u64 {
+            let deadline = hpet::now_ns() + 200_000;
+            while hpet::now_ns() < deadline {
                 core::hint::spin_loop();
             }
             lapic::send_sipi(apic, 0x08);
 
             let mut up = false;
-            for _ in 0..20_000_000u64 {
+            let deadline = hpet::now_ns() + 100_000_000;
+            while hpet::now_ns() < deadline {
                 if AP_READY.load(Ordering::SeqCst) != 0 {
                     up = true;
                     break;
