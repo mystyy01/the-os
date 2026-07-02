@@ -38,6 +38,7 @@ mod ipc;
 mod irq;
 mod lapic;
 mod msr;
+mod pci;
 mod pic;
 mod pit;
 mod pmm;
@@ -116,6 +117,18 @@ extern "C" fn ap_main() -> ! {
 #[unsafe(no_mangle)]
 extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
     serial::init();
+    for device in 0..32u8 {
+        let (vendor, dev) = pci::vendor_device(0, device, 0);
+        if vendor != 0xFFFF {
+            serial::write_str("pci dev ");
+            serial::write_hex(device as u64);
+            serial::write_str(" vendor ");
+            serial::write_hex(vendor as u64);
+            serial::write_str(" device ");
+            serial::write_hex(dev as u64);
+            serial::write_str("\n");
+        }
+    }
     fb::init(multiboot2_info);
     serial::write_str("init idt\n");
     idt::init();
