@@ -2,8 +2,8 @@
 #![no_main]
 
 use libsys::{
-    OP_ECHO, OP_ECHO_TS, PP_BASE, PP_ITERS, PP_WARMUP, SVC_ECHO, mbox_call, mbox_call_prof,
-    mbox_call_spin, mbox_connect, print, rdtsc, set_direct_wake,
+    OP_ECHO, OP_ECHO_TS, PP_BASE, PP_ITERS, PP_WARMUP, SVC_ECHO, SVC_ECHO_LOCAL, mbox_call,
+    mbox_call_prof, mbox_call_spin, mbox_connect, print, rdtsc, set_direct_wake,
 };
 
 const WARMUP: u64 = 256;
@@ -199,6 +199,12 @@ unsafe extern "C" fn _start() -> ! {
     row("512B  yield", idx, mbox_call, 512);
     row("4096B busy ", idx, mbox_call_spin, 4096);
     row("4096B yield", idx, mbox_call, 4096);
+    let lidx = mbox_connect(SVC_ECHO_LOCAL);
+    print("--- same-core: handoff ---\n");
+    row("8B    local", lidx, mbox_call, 8);
+    row("512B  local", lidx, mbox_call, 512);
+    row("4096B local", lidx, mbox_call, 4096);
+
     cold(idx, "--- cold A: directed wake ---\n");
     set_direct_wake(false);
     cold(idx, "--- cold B: scheduler lap ---\n");

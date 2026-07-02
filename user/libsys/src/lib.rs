@@ -41,6 +41,7 @@ pub const SVC_ATA: u32 = 2;
 pub const SVC_FS: u32 = 3;
 pub const SVC_KBD: u32 = 4;
 pub const SVC_ECHO: u32 = 5;
+pub const SVC_ECHO_LOCAL: u32 = 6;
 
 const EMPTY: u32 = 0;
 const REQ: u32 = 1;
@@ -97,6 +98,7 @@ pub struct Mailbox {
     pub msg_offset: u32,
     pub status: u32,
     pub len: u32,
+    pub client_core: u32,
 }
 
 fn alloc_next() -> &'static AtomicU32 {
@@ -138,9 +140,33 @@ fn inbox_count(svc: u32) -> &'static AtomicU32 {
 const SRVSTATE_OFF: usize = 0x56000;
 const SRV_SPINNING: u32 = 0;
 const SRV_BLOCKED: u32 = 1;
+const SRV_CORE_UNKNOWN: u32 = 0xFFFF_FFFF;
 
 fn srv_state(svc: u32) -> *mut u32 {
-    (ARENA + SRVSTATE_OFF as u64 + svc as u64 * 4) as *mut u32
+    (ARENA + SRVSTATE_OFF as u64 + svc as u64 * 8) as *mut u32
+}
+
+fn srv_core(svc: u32) -> *mut u32 {
+    (ARENA + SRVSTATE_OFF as u64 + svc as u64 * 8 + 4) as *mut u32
+}
+
+static mut MY_CORE: u32 = SRV_CORE_UNKNOWN;
+
+pub fn my_core() -> u32 {
+    unsafe {
+        if MY_CORE == SRV_CORE_UNKNOWN {
+            MY_CORE = syscall(21, 0, 0, 0, 0) as u32;
+        }
+        MY_CORE
+    }
+}
+
+pub fn handoff_to_service(svc: u32) -> u64 {
+    unsafe { syscall(19, svc as u64, 0, 0, 0) }
+}
+
+pub fn handoff_to_pid(pid: u32) -> u64 {
+    unsafe { syscall(20, pid as u64, 0, 0, 0) }
 }
 
 fn notify_if_blocked(svc: u32) {
@@ -166,6 +192,7 @@ pub fn mbox_connect(service_id: u32) -> usize {
     mb.service_id = service_id;
     mb.msg_offset = (BUFPOOL_OFF + idx * BUF_SIZE) as u32;
     mb.status = EMPTY;
+    mb.client_core = my_core();
 
     if (service_id as usize) < MAX_SERVICES {
         let slot = inbox_count(service_id).fetch_add(1, Ordering::Relaxed) as usize;
@@ -202,8 +229,19 @@ pub fn mbox_call(idx: usize, data: &[u8], out: &mut [u8]) -> usize {
     core::sync::atomic::fence(Ordering::Release);
     mb.status = REQ;
     core::sync::atomic::fence(Ordering::SeqCst);
-    notify_if_blocked(mb.service_id);
 
+    let svc = mb.service_id;
+    if unsafe { core::ptr::read_volatile(srv_core(svc)) } == my_core() {
+        while unsafe { core::ptr::read_volatile(&mb.status) } != REPLY {
+            if handoff_to_service(svc) != 0 {
+                break;
+            }
+        }
+    }
+
+    if unsafe { core::ptr::read_volatile(&mb.status) } != REPLY {
+        notify_if_blocked(svc);
+    }
     while unsafe { core::ptr::read_volatile(&mb.status) } != REPLY {
         unsafe {
             syscall(9, 0, 0, 0, 0);
@@ -279,8 +317,9 @@ pub fn register(op: u8, h: Handler) {
     }
 }
 
-fn serve_scan(my_service: u32, count: &AtomicU32) -> bool {
+fn serve_scan(my_service: u32, count: &AtomicU32) -> (bool, bool) {
     let mut found = false;
+    let mut remote = false;
     let n = core::cmp::min(count.load(Ordering::Relaxed) as usize, INBOX_CAP);
     for k in 0..n {
         let mi = inboxes()[my_service as usize].idx[k] as usize;
@@ -288,6 +327,9 @@ fn serve_scan(my_service: u32, count: &AtomicU32) -> bool {
             continue;
         }
         let mb = &mut mailboxes()[mi];
+        if mb.client_core != my_core() {
+            remote = true;
+        }
         if unsafe { core::ptr::read_volatile(&mb.status) } == REQ && mb.service_id == my_service {
             found = true;
             core::sync::atomic::fence(Ordering::Acquire);
@@ -307,9 +349,12 @@ fn serve_scan(my_service: u32, count: &AtomicU32) -> bool {
             mb.len = rn as u32;
             core::sync::atomic::fence(Ordering::Release);
             mb.status = REPLY;
+            if mb.client_core == my_core() {
+                handoff_to_pid(mb.client_id);
+            }
         }
     }
-    found
+    (found, remote)
 }
 
 const SPIN_BUDGET: u32 = 5_000;
@@ -317,20 +362,22 @@ const SPIN_BUDGET: u32 = 5_000;
 pub fn serve(my_service: u32) -> ! {
     let count = inbox_count(my_service);
     let state = srv_state(my_service);
+    unsafe { core::ptr::write_volatile(srv_core(my_service), my_core()) };
     let mut empty: u32 = 0;
     loop {
-        if serve_scan(my_service, count) {
+        let (found, remote) = serve_scan(my_service, count);
+        if found {
             empty = 0;
             continue;
         }
         empty += 1;
-        if empty < SPIN_BUDGET {
+        if remote && empty < SPIN_BUDGET {
             core::hint::spin_loop();
             continue;
         }
         unsafe { core::ptr::write_volatile(state, SRV_BLOCKED) };
         core::sync::atomic::fence(Ordering::SeqCst);
-        if !serve_scan(my_service, count) {
+        if !serve_scan(my_service, count).0 {
             block(my_service);
         }
         unsafe { core::ptr::write_volatile(state, SRV_SPINNING) };
@@ -341,8 +388,9 @@ pub fn serve(my_service: u32) -> ! {
 
 pub fn serve_spin(my_service: u32) -> ! {
     let count = inbox_count(my_service);
+    unsafe { core::ptr::write_volatile(srv_core(my_service), my_core()) };
     loop {
-        if !serve_scan(my_service, count) {
+        if !serve_scan(my_service, count).0 {
             core::hint::spin_loop();
         }
     }

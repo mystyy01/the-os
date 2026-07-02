@@ -24,6 +24,8 @@ unsafe extern "C" fn _start() -> ! {
 
     let echo = include_bytes!("../../dist/echo.elf");
     spawn(echo, 2);
+    let echo_local = include_bytes!("../../dist/echo_local.elf");
+    spawn(echo_local, 3);
     let bench = include_bytes!("../../dist/bench.elf");
     spawn(bench, 3);
 

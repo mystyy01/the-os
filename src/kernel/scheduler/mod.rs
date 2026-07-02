@@ -210,6 +210,43 @@ pub fn try_direct_wake() -> bool {
     }
 }
 
+pub fn find_local_task(pid: i32) -> *mut Task {
+    unsafe {
+        let s = &mut SCHEDULERS[crate::cpu::id() as usize];
+        for priority in 0..PRIORITY_LEVELS {
+            for slot in 0..MAX_TASKS_PER_PRIORITY {
+                if let Some(task) = s.queues[priority][slot].as_mut() {
+                    if task.pid == pid {
+                        return task;
+                    }
+                }
+            }
+        }
+    }
+    return null_mut();
+}
+
+pub fn handoff_to(next: *mut Task) -> bool {
+    unsafe {
+        if next.is_null() {
+            return false;
+        }
+        (*next).state = TaskState::Ready;
+        let prev = get_current_task();
+        if next == prev {
+            return true;
+        }
+        set_current_task(Some(next));
+
+        core::arch::asm!("mov cr3, {}", in(reg) (*next).cr3, options(nostack));
+        set_stack_top((*next).kstack_top);
+        gdt::set_rsp0((*next).kstack_top);
+
+        switch_to(&raw mut (*prev).ksp, (*next).ksp);
+        return true;
+    }
+}
+
 pub fn wake(task: Option<*mut Task>) {
     unsafe {
         if task.is_none() {

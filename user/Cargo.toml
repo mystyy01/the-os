@@ -15,6 +15,7 @@ members = [
     "drivers/ata_pio_driver",
     "shell",
     "services/echo",
+    "services/echo_local",
     "bench",
 ]
 

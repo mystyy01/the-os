@@ -120,6 +120,19 @@ pub fn register_server(service_id: u32, pid: i32, core: u32) {
     }
 }
 
+pub fn server_pid(service_id: u32) -> i32 {
+    if service_id as usize >= MAX_SERVICES {
+        return -1;
+    }
+    unsafe {
+        let s = SERVERS[service_id as usize];
+        if !s.used {
+            return -1;
+        }
+        return s.pid;
+    }
+}
+
 pub fn wake_server(service_id: u32) {
     if service_id as usize >= MAX_SERVICES {
         return;
@@ -206,6 +219,7 @@ pub struct Mailbox {
     pub msg_offset: u32,
     pub status: u32,
     pub len: u32,
+    pub client_core: u32,
 }
 
 pub fn init() {

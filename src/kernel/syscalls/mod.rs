@@ -285,6 +285,33 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             scheduler::set_direct_wake(arg1 != 0);
             return 0;
         }
+        19 => {
+            let pid = crate::ipc::server_pid(arg1 as u32);
+            if pid < 0 {
+                return 1;
+            }
+            let t = scheduler::find_local_task(pid);
+            if t.is_null() {
+                return 1;
+            }
+            if scheduler::handoff_to(t) {
+                return 0;
+            }
+            return 1;
+        }
+        20 => {
+            let t = scheduler::find_local_task(arg1 as i32);
+            if t.is_null() {
+                return 1;
+            }
+            if scheduler::handoff_to(t) {
+                return 0;
+            }
+            return 1;
+        }
+        21 => unsafe {
+            return cpu::id() as u64;
+        },
         _ => u64::MAX,
     }
 }

@@ -61,6 +61,7 @@ user: $(LWEXT4_LIB)
 	$(call build_user,ata_pio_driver)
 	$(call build_user,fs)
 	$(call build_user,echo)
+	$(call build_user,echo_local)
 	$(call build_user,bench)
 	$(call build_user,the-initializer)
 
