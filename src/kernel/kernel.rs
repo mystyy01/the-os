@@ -239,7 +239,7 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
         let pml4 = vmm::create_address_space();
         let entry = elf::load(bytes.as_ptr(), bytes.len(), pml4);
         let user_stack: u64 = 0x10000000;
-        let stack_pages: u64 = 64;
+        let stack_pages: u64 = 512;
         let mut i: u64 = 0;
         while i < stack_pages {
             let phys = pmm::alloc_pages(0);

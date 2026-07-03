@@ -93,4 +93,6 @@ unsafe extern "C" fn _start() -> ! {
     register(OP_READ, on_read);
 
     serve(SVC_KBD);
+
+    loop {}
 }

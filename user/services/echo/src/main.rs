@@ -1,9 +1,7 @@
 #![no_std]
 #![no_main]
 
-use libsys::{
-    OP_ECHO, OP_ECHO_TS, PP_BASE, PP_ITERS, PP_WARMUP, SVC_ECHO, rdtsc, register, serve,
-};
+use libsys::{OP_ECHO, OP_ECHO_TS, PP_BASE, PP_ITERS, PP_WARMUP, SVC_ECHO, rdtsc, register, serve};
 
 fn on_echo(req: &[u8], reply: &mut [u8]) -> usize {
     let n = req.len();
@@ -41,4 +39,6 @@ unsafe extern "C" fn _start() -> ! {
     register(OP_ECHO, on_echo);
     register(OP_ECHO_TS, on_echo_ts);
     serve(SVC_ECHO);
+
+    loop {}
 }

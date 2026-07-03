@@ -22,4 +22,6 @@ unsafe extern "C" fn _start() -> ! {
     register(OP_ECHO, on_echo);
     register(OP_ECHO_TS, on_echo_ts);
     serve(SVC_ECHO_LOCAL);
+
+    loop {}
 }

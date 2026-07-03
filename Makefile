@@ -76,8 +76,21 @@ $(ISO): $(KERNEL_BIN)
 	grub-mkrescue -o $@ $(ISO_DIR)
 
 FSROOT = fsroot
+FSROOT_BIN = $(FSROOT)/bin
+EXCLUDE_BIN = vfs ata_pio_driver fs the-initializer
 
-disk.img: $(FSROOT)/hello.txt
+.PHONY: fsroot-bin
+
+fsroot-bin: user
+	mkdir -p $(FSROOT_BIN)
+	for f in $(USER_DIST)/*.elf; do \
+		name=$$(basename $$f .elf); \
+		skip=0; \
+		for e in $(EXCLUDE_BIN); do [ "$$name" = "$$e" ] && skip=1; done; \
+		[ $$skip -eq 0 ] && cp $$f $(FSROOT_BIN)/$$name; \
+	done; true
+
+disk.img: $(FSROOT)/hello.txt fsroot-bin
 	truncate -s 64M disk.img
 	mke2fs -q -t ext4 -F -O ^64bit,^metadata_csum,^orphan_file,^has_journal -d $(FSROOT) disk.img
 

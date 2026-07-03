@@ -84,4 +84,5 @@ unsafe extern "C" fn _start() -> ! {
     register(OP_BIND, on_bind);
     register(OP_RESOLVE, on_resolve);
     serve(SVC_VFS);
+    loop {}
 }

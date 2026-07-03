@@ -42,6 +42,7 @@ pub const SVC_FS: u32 = 3;
 pub const SVC_KBD: u32 = 4;
 pub const SVC_ECHO: u32 = 5;
 pub const SVC_ECHO_LOCAL: u32 = 6;
+pub const SVC_INIT: u32 = 7;
 
 const EMPTY: u32 = 0;
 const REQ: u32 = 1;
@@ -128,7 +129,10 @@ struct ServiceInbox {
 
 fn inboxes() -> &'static mut [ServiceInbox] {
     unsafe {
-        core::slice::from_raw_parts_mut((ARENA + INBOX_OFF as u64) as *mut ServiceInbox, MAX_SERVICES)
+        core::slice::from_raw_parts_mut(
+            (ARENA + INBOX_OFF as u64) as *mut ServiceInbox,
+            MAX_SERVICES,
+        )
     }
 }
 
@@ -141,6 +145,14 @@ const SRVSTATE_OFF: usize = 0x56000;
 const SRV_SPINNING: u32 = 0;
 const SRV_BLOCKED: u32 = 1;
 const SRV_CORE_UNKNOWN: u32 = 0xFFFF_FFFF;
+
+const SRV_STOPPED: u32 = 2;
+
+pub fn stop_serving(svc: u32) {
+    unsafe {
+        core::ptr::write_volatile(srv_state(svc), SRV_STOPPED);
+    }
+}
 
 fn srv_state(svc: u32) -> *mut u32 {
     (ARENA + SRVSTATE_OFF as u64 + svc as u64 * 8) as *mut u32
@@ -359,12 +371,15 @@ fn serve_scan(my_service: u32, count: &AtomicU32) -> (bool, bool) {
 
 const SPIN_BUDGET: u32 = 5_000;
 
-pub fn serve(my_service: u32) -> ! {
+pub fn serve(my_service: u32) {
     let count = inbox_count(my_service);
     let state = srv_state(my_service);
     unsafe { core::ptr::write_volatile(srv_core(my_service), my_core()) };
     let mut empty: u32 = 0;
     loop {
+        if unsafe { core::ptr::read_volatile(state) } == SRV_STOPPED {
+            return;
+        }
         let (found, remote) = serve_scan(my_service, count);
         if found {
             empty = 0;
@@ -491,11 +506,21 @@ pub fn read(fd: i32, buf: &mut [u8]) -> i32 {
             return -1;
         }
         let conn = FD_TABLE[fd as usize].conn;
-        let mut req = [0u8; 9];
-        req[0] = OP_READ;
-        req[1..5].copy_from_slice(&FD_TABLE[fd as usize].handle.to_le_bytes());
-        req[5..9].copy_from_slice(&(buf.len() as u32).to_le_bytes());
-        mbox_call(conn, &req, buf) as i32
+        let handle = FD_TABLE[fd as usize].handle;
+        let mut total = 0usize;
+        while total < buf.len() {
+            let chunk_len = core::cmp::min(buf.len() - total, BUF_SIZE);
+            let mut req = [0u8; 9];
+            req[0] = OP_READ;
+            req[1..5].copy_from_slice(&handle.to_le_bytes());
+            req[5..9].copy_from_slice(&(chunk_len as u32).to_le_bytes());
+            let n = mbox_call(conn, &req, &mut buf[total..total + chunk_len]);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        total as i32
     }
 }
 

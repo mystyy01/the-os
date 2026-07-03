@@ -4,8 +4,8 @@
 mod fake_libc_thing;
 
 use libsys::{
-    OP_OPEN, OP_READ, OP_WRITE, SVC_ATA, SVC_FS, mbox_call, mbox_connect, print, register, serve,
-    vfs_bind, vfs_resolve,
+    OP_BIND, OP_OPEN, OP_READ, OP_WRITE, SVC_ATA, SVC_FS, mbox_call, mbox_connect, print, register,
+    serve, vfs_bind, vfs_resolve,
 };
 
 // needs to match lwext4
@@ -233,11 +233,21 @@ unsafe extern "C" fn _start() -> ! {
             print("FS: mount FAIL\n");
         }
     }
+
     register(OP_READ, on_read);
     register(OP_OPEN, on_open);
     register(OP_WRITE, on_write);
 
     vfs_bind("/".as_bytes(), SVC_FS);
 
+    let svc_id = vfs_resolve(b"/run/init");
+    let idx = mbox_connect(svc_id);
+    let mut req = [0u8; 1];
+    req[0] = OP_BIND;
+    let mut out = [0u8; 4];
+    mbox_call(idx, &req, &mut out);
+
     serve(SVC_FS);
+
+    loop {}
 }
