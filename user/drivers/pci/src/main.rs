@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use libsys::{OP_PCI_FIND, SVC_PCI, inl, outl, register, serve};
+use libsys::{OP_PCI_CFG_READ32, OP_PCI_FIND, SVC_PCI, inl, outl, register, serve};
 
 const CONFIG_ADDRESS: u16 = 0xCF8;
 const CONFIG_DATA: u16 = 0xCFC;
@@ -64,9 +64,20 @@ fn on_find(req: &[u8], reply: &mut [u8]) -> usize {
     1
 }
 
+fn on_cfg_read32(req: &[u8], reply: &mut [u8]) -> usize {
+    let bus = req[1];
+    let device = req[2];
+    let function = req[3];
+    let offset = req[4];
+    let val = config_read32(bus, device, function, offset);
+    reply[0..4].copy_from_slice(&val.to_le_bytes());
+    4
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
     register(OP_PCI_FIND, on_find);
+    register(OP_PCI_CFG_READ32, on_cfg_read32);
     serve(SVC_PCI);
     loop {}
 }

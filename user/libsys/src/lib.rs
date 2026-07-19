@@ -108,6 +108,7 @@ pub const OP_IRQ: u8 = 6;
 pub const OP_ECHO: u8 = 7;
 pub const OP_ECHO_TS: u8 = 8;
 pub const OP_PCI_FIND: u8 = 9;
+pub const OP_PCI_CFG_READ32: u8 = 10;
 
 pub const PP_BASE: u64 = ARENA + 0x60000;
 pub const PP_WARMUP: u64 = 256;

@@ -8,6 +8,7 @@
 resolver = "2"
 members = [
     "libsys",
+    "libvirtio",
     "compat/libc",
     "init",
     "services/vfs",

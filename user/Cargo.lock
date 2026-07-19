@@ -61,6 +61,13 @@ name = "libsys"
 version = "0.1.0"
 
 [[package]]
+name = "libvirtio"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
 name = "pci"
 version = "0.1.0"
 dependencies = [
