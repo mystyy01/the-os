@@ -1,0 +1,8 @@
+[package]
+name = "i915"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libsys = { path = "../../../../libsys" }
+compat-libc = { path = "../../../../compat/libc" }

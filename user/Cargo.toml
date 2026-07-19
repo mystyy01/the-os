@@ -8,11 +8,15 @@
 resolver = "2"
 members = [
     "libsys",
+    "compat/libc",
     "init",
     "services/vfs",
     "services/fs",
-    "drivers/kb_driver",
-    "drivers/ata_pio_driver",
+    "drivers/kbd",
+    "drivers/ata",
+    "drivers/pci",
+    "drivers/usb",
+    "drivers/graphics/intel/i915",
     "shell",
     "services/echo",
     "services/echo_local",

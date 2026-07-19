@@ -56,13 +56,15 @@ $(BUILD_DIR)/ap_trampoline.bin: src/boot/ap_trampoline_thingy_haha_i_love_the_wo
 
 user: $(LWEXT4_LIB)
 	$(call build_user,vfs)
-	$(call build_user,kb_driver)
+	$(call build_user,kbd)
 	$(call build_user,shell)
-	$(call build_user,ata_pio_driver)
+	$(call build_user,ata)
 	$(call build_user,fs)
 	$(call build_user,echo)
 	$(call build_user,echo_local)
 	$(call build_user,bench)
+	$(call build_user,pci)
+	$(call build_user,usb)
 	$(call build_user,the-initializer)
 
 rust: user
@@ -77,7 +79,7 @@ $(ISO): $(KERNEL_BIN)
 
 FSROOT = fsroot
 FSROOT_BIN = $(FSROOT)/bin
-EXCLUDE_BIN = vfs ata_pio_driver fs the-initializer
+EXCLUDE_BIN = vfs ata fs pci usb the-initializer
 
 .PHONY: fsroot-bin
 
@@ -85,10 +87,8 @@ fsroot-bin: user
 	mkdir -p $(FSROOT_BIN)
 	for f in $(USER_DIST)/*.elf; do \
 		name=$$(basename $$f .elf); \
-		skip=0; \
-		for e in $(EXCLUDE_BIN); do [ "$$name" = "$$e" ] && skip=1; done; \
-		[ $$skip -eq 0 ] && cp $$f $(FSROOT_BIN)/$$name; \
-	done; true
+		case " $(EXCLUDE_BIN) " in *" $$name "*) ;; *) cp $$f $(FSROOT_BIN)/$$name ;; esac; \
+	done
 
 disk.img: $(FSROOT)/hello.txt fsroot-bin
 	truncate -s 64M disk.img

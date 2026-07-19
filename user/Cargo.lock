@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "ata_pio_driver"
+name = "ata"
 version = "0.1.0"
 dependencies = [
  "libsys",
@@ -15,6 +15,10 @@ version = "0.1.0"
 dependencies = [
  "libsys",
 ]
+
+[[package]]
+name = "compat-libc"
+version = "0.1.0"
 
 [[package]]
 name = "echo"
@@ -38,7 +42,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "kb_driver"
+name = "i915"
+version = "0.1.0"
+dependencies = [
+ "compat-libc",
+ "libsys",
+]
+
+[[package]]
+name = "kbd"
 version = "0.1.0"
 dependencies = [
  "libsys",
@@ -49,6 +61,13 @@ name = "libsys"
 version = "0.1.0"
 
 [[package]]
+name = "pci"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
 name = "shell"
 version = "0.1.0"
 dependencies = [
@@ -57,6 +76,13 @@ dependencies = [
 
 [[package]]
 name = "the-initializer"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
+name = "usb"
 version = "0.1.0"
 dependencies = [
  "libsys",

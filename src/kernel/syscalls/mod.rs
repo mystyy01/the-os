@@ -312,6 +312,36 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
         21 => unsafe {
             return cpu::id() as u64;
         },
+        22 => unsafe {
+            const MMIO_VBASE: u64 = 0x2000_0000;
+            let phys = arg1 & !0xFFF;
+            let page_count = arg2;
+            let task = get_current_task();
+            let pml4 = (*task).cr3 as *mut u64;
+            let mut i = 0u64;
+            while i < page_count {
+                vmm::map_page(pml4, MMIO_VBASE + i * 0x1000, phys + i * 0x1000, 0x17);
+                i += 1;
+            }
+            return MMIO_VBASE;
+        },
+        23 => unsafe {
+            const DMA_VBASE: u64 = 0x4000_0000;
+            let page_count = arg1;
+            let phys_out = arg2 as *mut u64;
+            let task = get_current_task();
+            let phys = pmm::alloc_pages(page_count as usize) as u64;
+            let pml4 = (*task).cr3 as *mut u64;
+            let vbase = DMA_VBASE + (*task).dma_bump_offset;
+            (*task).dma_bump_offset += page_count * 0x1000;
+            let mut i = 0u64;
+            while i < page_count {
+                vmm::map_page(pml4, vbase + i * 0x1000, phys + i * 0x1000, 0x07);
+                i += 1;
+            }
+            *phys_out = phys;
+            return vbase;
+        },
         _ => u64::MAX,
     }
 }

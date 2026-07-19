@@ -2,8 +2,8 @@
 #![no_main]
 
 use libsys::{
-    OP_BIND, SVC_INIT, SVC_KBD, open, print, read, register, serve, spawn, stop_serving, syscall,
-    vfs_bind, vfs_resolve,
+    OP_BIND, OP_PCI_FIND, SVC_INIT, SVC_KBD, SVC_PCI, mbox_call, mbox_connect, open, print,
+    print_hex, read, register, serve, spawn, stop_serving, syscall, vfs_bind, vfs_resolve,
 };
 
 fn fs_wait(req: &[u8], reply: &mut [u8]) -> usize {
@@ -12,14 +12,46 @@ fn fs_wait(req: &[u8], reply: &mut [u8]) -> usize {
     return 0;
 }
 
+fn pci_probe_debug() {
+    let idx = mbox_connect(SVC_PCI);
+    let req = [OP_PCI_FIND, 0x03, 0xFF];
+    let mut out = [0u8; 20];
+    mbox_call(idx, &req, &mut out);
+    if out[0] == 0 {
+        print("PCI: no class 0x03 device found\n");
+        return;
+    }
+    let vendor = u16::from_le_bytes([out[4], out[5]]);
+    let dev_id = u16::from_le_bytes([out[6], out[7]]);
+    let bar0 = u32::from_le_bytes([out[12], out[13], out[14], out[15]]);
+    let bar1 = u32::from_le_bytes([out[16], out[17], out[18], out[19]]);
+    print("PCI: display dev bus=0 device=");
+    print_hex(out[2] as u32);
+    print(" vendor=");
+    print_hex(vendor as u32);
+    print(" device=");
+    print_hex(dev_id as u32);
+    print(" bar0=");
+    print_hex(bar0);
+    print(" bar1=");
+    print_hex(bar1);
+    print("\n");
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
     let vfs = include_bytes!("../../dist/vfs.elf");
     spawn(vfs, 1);
-    let ata = include_bytes!("../../dist/ata_pio_driver.elf");
+    let ata = include_bytes!("../../dist/ata.elf");
     spawn(ata, 0);
     let fs = include_bytes!("../../dist/fs.elf");
     spawn(fs, 0);
+    let pci = include_bytes!("../../dist/pci.elf");
+    spawn(pci, 0);
+    let usb = include_bytes!("../../dist/usb.elf");
+    spawn(usb, 0);
+
+    pci_probe_debug();
 
     // init serves ipc cuz like we had race conditions where fs wasnt mounted when other shit spawned
     register(OP_BIND, fs_wait); // bind is best fit ig
@@ -29,7 +61,7 @@ unsafe extern "C" fn _start() -> ! {
     const MAX_ELF_SIZE: usize = 256 * 1024;
     let mut scratch = [0u8; MAX_ELF_SIZE];
 
-    let kbd_fd = open(b"/bin/kb_driver");
+    let kbd_fd = open(b"/bin/kbd");
     if kbd_fd < 0 {
         print("KBD FD FAILED\n");
         loop {}

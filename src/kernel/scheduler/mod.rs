@@ -38,6 +38,7 @@ pub struct Task {
     pub cr3: u64,
     pub pid: i32,
     pub ipc_con: [Option<IPCConnection>; MAX_IPC_CONNECTIONS_PER_TASK],
+    pub dma_bump_offset: u64,
 }
 
 pub const MAX_TASKS_PER_PRIORITY: usize = 16;
@@ -284,6 +285,7 @@ pub fn spawn_task(entry: fn(), priority: u8) {
             cr3: cr3,
             pid: next_pid(),
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
+            dma_bump_offset: 0,
         };
         let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for (i, t) in s.queues[priority as usize].iter().enumerate() {
@@ -322,6 +324,7 @@ pub fn spawn_idle(entry: fn()) {
             cr3: cr3,
             pid: IDLE_PID,
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
+            dma_bump_offset: 0,
         };
         let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for (i, t) in s.queues[0 as usize].iter().enumerate() {
@@ -358,6 +361,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8, 
             cr3: cr3,
             pid: next_pid(),
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
+            dma_bump_offset: 0,
         };
 
         let s = &mut SCHEDULERS[cpu_id as usize];

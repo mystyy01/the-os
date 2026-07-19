@@ -43,15 +43,47 @@ pub const SVC_KBD: u32 = 4;
 pub const SVC_ECHO: u32 = 5;
 pub const SVC_ECHO_LOCAL: u32 = 6;
 pub const SVC_INIT: u32 = 7;
+pub const SVC_PCI: u32 = 8;
 
 const EMPTY: u32 = 0;
 const REQ: u32 = 1;
 const REPLY: u32 = 2;
 
 use core::panic::PanicInfo;
+
+struct PanicBuf {
+    buf: [u8; 256],
+    len: usize,
+}
+
+impl core::fmt::Write for PanicBuf {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let bytes = s.as_bytes();
+        let n = core::cmp::min(bytes.len(), self.buf.len() - self.len);
+        self.buf[self.len..self.len + n].copy_from_slice(&bytes[..n]);
+        self.len += n;
+        Ok(())
+    }
+}
+
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
-    loop {}
+    use core::fmt::Write;
+    let mut pb = PanicBuf {
+        buf: [0u8; 256],
+        len: 0,
+    };
+    let _ = write!(pb, "USERSPACE PANIC (pid {})", get_self_pid());
+    if let Some(loc) = info.location() {
+        let _ = write!(pb, " at {}:{}", loc.file(), loc.line());
+    }
+    let _ = write!(pb, ": {}\n", info.message());
+    print(core::str::from_utf8(&pb.buf[..pb.len]).unwrap_or("USERSPACE PANIC (fmt failed)\n"));
+    loop {
+        unsafe {
+            syscall(9, 0, 0, 0, 0);
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -75,6 +107,7 @@ pub const OP_OPEN: u8 = 5;
 pub const OP_IRQ: u8 = 6;
 pub const OP_ECHO: u8 = 7;
 pub const OP_ECHO_TS: u8 = 8;
+pub const OP_PCI_FIND: u8 = 9;
 
 pub const PP_BASE: u64 = ARENA + 0x60000;
 pub const PP_WARMUP: u64 = 256;
@@ -85,7 +118,7 @@ pub unsafe fn syscall(syscall_num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u
     let rcx: u64;
     let r11: u64;
     unsafe {
-        core::arch::asm!("syscall", in("rax") syscall_num, in("rdi") arg1, in("rdx") arg2, in("r10") arg3, lateout("rax") res, out("rcx") rcx, out("r11") r11, options(nostack));
+        core::arch::asm!("syscall", in("rax") syscall_num, in("rdi") arg1, in("rdx") arg2, in("r10") arg3, in("r8") arg4, lateout("rax") res, out("rcx") rcx, out("r11") r11, options(nostack));
     }
     return res;
 }
@@ -171,6 +204,16 @@ pub fn my_core() -> u32 {
         }
         MY_CORE
     }
+}
+
+pub fn map_mmio(phys_addr: u64, page_count: u64) -> u64 {
+    unsafe { syscall(22, phys_addr, page_count, 0, 0) }
+}
+
+pub fn alloc_dma(pages: u64) -> (u64, u64) {
+    let mut phys: u64 = 0;
+    let virt = unsafe { syscall(23, pages, &mut phys as *mut u64 as u64, 0, 0) };
+    (virt, phys)
 }
 
 pub fn handoff_to_service(svc: u32) -> u64 {
@@ -433,10 +476,34 @@ pub unsafe fn inw(port: u16) -> u16 {
     return v;
 }
 
+pub unsafe fn outl(port: u16, val: u32) {
+    unsafe {
+        core::arch::asm!("out dx, eax", in("dx") port, in("eax") val, options(nostack, preserves_flags));
+    }
+}
+
+pub unsafe fn inl(port: u16) -> u32 {
+    let v: u32;
+    unsafe {
+        core::arch::asm!("in eax, dx", in("dx") port, out("eax") v, options(nostack, preserves_flags));
+    }
+    return v;
+}
+
 pub fn print(s: &str) {
     unsafe {
         syscall(8, s.as_ptr() as u64, s.len() as u64, 0, 0);
     }
+}
+
+pub fn print_hex(mut n: u32) {
+    let digits = b"0123456789abcdef";
+    let mut buf = [0u8; 8];
+    for i in 0..8 {
+        buf[7 - i] = digits[(n & 0xF) as usize];
+        n >>= 4;
+    }
+    print(core::str::from_utf8(&buf).unwrap_or("?"));
 }
 
 pub fn spawn(bytes: &[u8], cpu_id: u8) -> i32 {
