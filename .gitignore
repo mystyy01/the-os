@@ -5,4 +5,5 @@ kernel.iso
 user/dist/
 disk.img
 usb.img
+fsroot/bin/
 vendors/lwext4/
