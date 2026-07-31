@@ -148,6 +148,8 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             // print for debugging - goes thru serial
             let bytes = unsafe { core::slice::from_raw_parts(arg1 as *const u8, arg2 as usize) };
 
+            crate::klog::append(bytes);
+
             serial::lock();
             for byte in bytes {
                 serial::write_byte(*byte);
@@ -318,19 +320,30 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             let page_count = arg2;
             let task = get_current_task();
             let pml4 = (*task).cr3 as *mut u64;
+            let vbase = MMIO_VBASE + (*task).mmio_bump_offset;
+            (*task).mmio_bump_offset += page_count * 0x1000;
             let mut i = 0u64;
             while i < page_count {
-                vmm::map_page(pml4, MMIO_VBASE + i * 0x1000, phys + i * 0x1000, 0x17);
+                vmm::map_page(pml4, vbase + i * 0x1000, phys + i * 0x1000, 0x17);
                 i += 1;
             }
-            return MMIO_VBASE;
+            return vbase;
         },
         23 => unsafe {
             const DMA_VBASE: u64 = 0x4000_0000;
             let page_count = arg1;
             let phys_out = arg2 as *mut u64;
             let task = get_current_task();
-            let phys = pmm::alloc_pages(page_count as usize) as u64;
+            let order = if page_count <= 1 {
+                0usize
+            } else {
+                (64 - (page_count - 1).leading_zeros()) as usize
+            };
+            let phys = pmm::alloc_pages(order) as u64;
+            if phys == 0 {
+                *phys_out = 0;
+                return 0;
+            }
             let pml4 = (*task).cr3 as *mut u64;
             let vbase = DMA_VBASE + (*task).dma_bump_offset;
             (*task).dma_bump_offset += page_count * 0x1000;
@@ -342,6 +355,42 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             *phys_out = phys;
             return vbase;
         },
+        24 => {
+            let color = arg1 as u32;
+            let info = crate::fb::info();
+            crate::fb::fill_rect(0, 0, info.width, info.height, color);
+            return 0;
+        }
+        25 => unsafe {
+            let entry = arg1;
+            let stack_order = arg2 as usize;
+            let priority = arg3 as u8;
+            return scheduler::spawn_thread_in(entry, stack_order, priority) as u64;
+        },
+        26 => {
+            return crate::sleepq::sleep(arg1, arg2);
+        }
+        27 => {
+            crate::sleepq::wakeup(arg1);
+            return 0;
+        }
+        28 => {
+            return pmm::total_pages();
+        }
+        29 => {
+            crate::msi::set_waker(arg1);
+            return 0;
+        }
+        30 => {
+            return crate::msi::take();
+        }
+        31 => {
+            return crate::klog::read_crash_snapshot(
+                arg1 as *mut u8,
+                arg2 as usize,
+                arg3 as usize,
+            ) as u64;
+        }
         _ => u64::MAX,
     }
 }

@@ -12,6 +12,8 @@ members = [
     "init",
     "services/vfs",
     "services/fs",
+    "services/logger",
+    "services/crashlogger",
     "drivers/kbd",
     "drivers/ata",
     "drivers/pci",
@@ -21,6 +23,7 @@ members = [
     "services/echo",
     "services/echo_local",
     "bench",
+    "threadtest",
 ]
 
 [profile.dev]

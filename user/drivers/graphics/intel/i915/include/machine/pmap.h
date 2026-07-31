@@ -63,6 +63,9 @@ pmap_remove(struct pmap *pm, uint64_t start, uint64_t end)
 	(void)end;
 }
 
+struct vm_page;
+void pmap_zero_page(struct vm_page *pg);
+
 #define PG_V 0x001
 #define PG_RW 0x002
 #define PG_U 0x004

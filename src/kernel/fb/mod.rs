@@ -24,6 +24,8 @@ static PRESENT: AtomicBool = AtomicBool::new(false);
 
 static mut CUR_COL: u32 = 0;
 static mut CUR_ROW: u32 = 0;
+static mut CRASH_COL: u32 = 0;
+static mut CRASH_ROW: u32 = 0;
 
 const FG: u32 = 0x00d0d0d0;
 const BG: u32 = 0x00000000;
@@ -139,6 +141,22 @@ pub fn clear() {
     }
 }
 
+static mut CUR_FG: u32 = FG;
+static mut ESC_STATE: u8 = 0;
+static mut ESC_NUM: u32 = 0;
+
+fn apply_sgr(n: u32) {
+    unsafe {
+        CUR_FG = match n {
+            31 => 0x00FF5050,
+            32 => 0x0050FF50,
+            33 => 0x00FFFF50,
+            36 => 0x0050FFFF,
+            _ => FG,
+        };
+    }
+}
+
 fn draw_glyph(c: u8, px: u32, py: u32) {
     let g = glyph(c);
     let w = glyph_w();
@@ -148,7 +166,7 @@ fn draw_glyph(c: u8, px: u32, py: u32) {
         for col in 0..w {
             let byte = g[row as usize * bytes_per_row + col as usize / 8];
             let bit = byte >> (7 - (col % 8)) & 1;
-            let color = if bit != 0 { FG } else { BG };
+            let color = if bit != 0 { unsafe { CUR_FG } } else { BG };
             put_pixel(px + col, py + row, color);
         }
     }
@@ -179,6 +197,37 @@ fn scroll() {
 
 pub fn con_putc(byte: u8) {
     unsafe {
+        match ESC_STATE {
+            1 => {
+                if byte == b'[' {
+                    ESC_STATE = 2;
+                    ESC_NUM = 0;
+                } else {
+                    ESC_STATE = 0;
+                }
+                return;
+            }
+            2 => {
+                match byte {
+                    b'0'..=b'9' => ESC_NUM = ESC_NUM * 10 + (byte - b'0') as u32,
+                    b';' => {
+                        apply_sgr(ESC_NUM);
+                        ESC_NUM = 0;
+                    }
+                    b'm' => {
+                        apply_sgr(ESC_NUM);
+                        ESC_STATE = 0;
+                    }
+                    _ => ESC_STATE = 0,
+                }
+                return;
+            }
+            _ => {}
+        }
+        if byte == 0x1b {
+            ESC_STATE = 1;
+            return;
+        }
         match byte {
             b'\n' => {
                 CUR_COL = 0;
@@ -199,6 +248,40 @@ pub fn con_putc(byte: u8) {
         if CUR_ROW >= text_rows() {
             scroll();
             CUR_ROW = text_rows() - 1;
+        }
+    }
+}
+
+pub fn crash_begin() {
+    unsafe {
+        fill_rect(0, 0, FB.width, FB.height, BG);
+        CRASH_COL = 0;
+        CRASH_ROW = 0;
+    }
+}
+
+pub fn crash_putc(byte: u8) {
+    unsafe {
+        match byte {
+            b'\n' => {
+                CRASH_COL = 0;
+                CRASH_ROW += 1;
+            }
+            b'\r' => {
+                CRASH_COL = 0;
+            }
+            _ => {
+                draw_glyph(byte, CRASH_COL * glyph_w(), CRASH_ROW * glyph_h());
+                CRASH_COL += 1;
+                if CRASH_COL >= text_cols() {
+                    CRASH_COL = 0;
+                    CRASH_ROW += 1;
+                }
+            }
+        }
+        if CRASH_ROW >= text_rows() {
+            scroll();
+            CRASH_ROW = text_rows() - 1;
         }
     }
 }

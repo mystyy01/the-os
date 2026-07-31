@@ -54,14 +54,6 @@ struct cdevsw {
 extern struct cdevsw cdevsw[];
 paddr_t drmmmap(dev_t kdev, off_t offset, int prot);
 
-static inline void *
-config_found_sm(struct device *self, void *aux,
+void *config_found_sm(struct device *self, void *aux,
     int (*print)(void *, const char *),
-    int (*submatch)(struct device *, void *, void *))
-{
-	(void)self;
-	(void)aux;
-	(void)print;
-	(void)submatch;
-	return NULL;
-}
+    int (*submatch)(struct device *, void *, void *));

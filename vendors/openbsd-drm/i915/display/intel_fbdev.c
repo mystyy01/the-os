@@ -333,6 +333,47 @@ int intel_fbdev_driver_fbdev_probe(struct drm_fb_helper *helper,
 	if (!intel_bo_is_shmem(obj) && !prealloc)
 		memset_io(info->screen_base, 0, info->screen_size);
 
+#ifdef I915_SHIM_DISPLAY_ONLY
+	if (fb->base.format->format == DRM_FORMAT_XRGB8888) {
+		u8 *base = (u8 *)info->screen_base;
+		u32 width = fb->base.width;
+		u32 height = fb->base.height;
+		u32 pitch = fb->base.pitches[0];
+		u32 x, y;
+
+		for (y = 0; y < height; y++) {
+			volatile u32 *line = (volatile u32 *)(base + y * pitch);
+
+			for (x = 0; x < width; x++) {
+				u32 color;
+
+				if (y < 64) {
+					color = 0x00ffffff;
+				} else if (y >= height - min_t(u32, height, 160)) {
+					color = ((x / 64) ^ (y / 64)) & 1 ?
+						0x00ffffff : 0x00000000;
+				} else if (x < width / 3) {
+					color = 0x00ff0000;
+				} else if (x < (width * 2) / 3) {
+					color = 0x0000ff00;
+				} else {
+					color = 0x000000ff;
+				}
+
+				line[x] = color;
+			}
+		}
+		wmb();
+		drm_info(display->drm,
+			 "I915_FIRST_PIXEL test_card_written %ux%u pitch=%u\n",
+			 width, height, pitch);
+	} else {
+		drm_warn(display->drm,
+			 "I915_FIRST_PIXEL unsupported format 0x%08x\n",
+			 fb->base.format->format);
+	}
+#endif
+
 	/* Use default scratch pixmap (info->pixmap.flags = FB_PIXMAP_SYSTEM) */
 
 	drm_dbg_kms(display->drm, "allocated %dx%d fb: 0x%08x\n",

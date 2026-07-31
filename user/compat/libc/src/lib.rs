@@ -2,14 +2,19 @@
 
 use core::ffi::{c_int, c_void};
 
-const ARENA_SIZE: usize = 16 * 1024 * 1024;
+const ARENA_SIZE: usize = 128 * 1024 * 1024;
 static mut ARENA: [u8; ARENA_SIZE] = [0; ARENA_SIZE];
 static mut OFFSET: usize = 0;
+
+unsafe extern "C" {
+    fn os_print(s: *const u8);
+}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malloc(size: usize) -> *mut c_void {
     let off = (OFFSET + 15) & !15;
     if off + size > ARENA_SIZE {
+        os_print(c"compat-libc: arena OOM".as_ptr() as *const u8);
         return core::ptr::null_mut();
     }
     OFFSET = off + size;
@@ -28,6 +33,58 @@ pub unsafe extern "C" fn calloc(nmemb: usize, size: usize) -> *mut c_void {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn free(_ptr: *mut c_void) {}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    let mut i = 0;
+    while i < n {
+        *dst.add(i) = *src.add(i);
+        i += 1;
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    if (dst as usize) < (src as usize) {
+        let mut i = 0;
+        while i < n {
+            *dst.add(i) = *src.add(i);
+            i += 1;
+        }
+    } else {
+        let mut i = n;
+        while i > 0 {
+            i -= 1;
+            *dst.add(i) = *src.add(i);
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memset(dst: *mut u8, c: c_int, n: usize) -> *mut u8 {
+    let b = c as u8;
+    let mut i = 0;
+    while i < n {
+        *dst.add(i) = b;
+        i += 1;
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> c_int {
+    let mut i = 0;
+    while i < n {
+        let (ca, cb) = (*a.add(i), *b.add(i));
+        if ca != cb {
+            return ca as c_int - cb as c_int;
+        }
+        i += 1;
+    }
+    0
+}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn compat_arena_alloc(size: usize) -> *mut c_void {

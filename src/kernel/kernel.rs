@@ -34,20 +34,24 @@ mod hpet;
 mod idle;
 mod idt;
 mod io;
+mod klog;
 mod ipc;
 mod irq;
 mod lapic;
 mod msr;
+mod msi;
 mod pic;
 mod pit;
 mod pmm;
 mod scheduler;
 mod serial;
+mod sleepq;
 mod syscalls;
 mod vmm;
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
+    serial::begin_crash_output();
     serial::write_str_raw("PANIC\n");
     if let Some(loc) = _info.location() {
         serial::write_str_raw(loc.file());

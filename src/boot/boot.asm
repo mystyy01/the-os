@@ -234,6 +234,9 @@ section .boot.text
 
     global isr_64
     isr_no_err 64
+
+    global isr_65
+    isr_no_err 65
     
     global context_switch
 
@@ -411,4 +414,3 @@ section .data
       dq 0
   gdt_end:
   
-

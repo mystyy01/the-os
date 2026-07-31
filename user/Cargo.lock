@@ -21,6 +21,13 @@ name = "compat-libc"
 version = "0.1.0"
 
 [[package]]
+name = "crashlogger"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
 name = "echo"
 version = "0.1.0"
 dependencies = [
@@ -61,6 +68,13 @@ name = "libsys"
 version = "0.1.0"
 
 [[package]]
+name = "logger"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
 name = "pci"
 version = "0.1.0"
 dependencies = [
@@ -76,6 +90,13 @@ dependencies = [
 
 [[package]]
 name = "the-initializer"
+version = "0.1.0"
+dependencies = [
+ "libsys",
+]
+
+[[package]]
+name = "threadtest"
 version = "0.1.0"
 dependencies = [
  "libsys",

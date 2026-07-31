@@ -38,6 +38,9 @@ fn pci_probe_debug() {
     print("\n");
 }
 
+const I915_BUF_SIZE: usize = 4 * 1024 * 1024;
+static mut I915_BUF: [u8; I915_BUF_SIZE] = [0; I915_BUF_SIZE];
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
     let vfs = include_bytes!("../../dist/vfs.elf");
@@ -68,6 +71,18 @@ unsafe extern "C" fn _start() -> ! {
     }
     let n = read(kbd_fd, &mut scratch);
     spawn(&scratch[..n as usize], 0);
+
+    let logger_fd = open(b"/bin/logger");
+    if logger_fd >= 0 {
+        let n = read(logger_fd, &mut scratch);
+        spawn(&scratch[..n as usize], 1);
+    }
+
+    let crashlogger_fd = open(b"/bin/crashlogger");
+    if crashlogger_fd >= 0 {
+        let n = read(crashlogger_fd, &mut scratch);
+        spawn(&scratch[..n as usize], 1);
+    }
 
     vfs_bind(b"/dev/keyboard", SVC_KBD);
     if vfs_resolve(b"/dev/keyboard") == SVC_KBD {
@@ -105,6 +120,18 @@ unsafe extern "C" fn _start() -> ! {
     }
     let n = read(bench_fd, &mut scratch);
     spawn(&scratch[..n as usize], 3);
+
+    let i915_fd = open(b"/bin/i915");
+    if i915_fd >= 0 {
+        let big = unsafe {
+            core::slice::from_raw_parts_mut(
+                core::ptr::addr_of_mut!(I915_BUF) as *mut u8,
+                I915_BUF_SIZE,
+            )
+        };
+        let n = read(i915_fd, big);
+        spawn(&big[..n as usize], 0);
+    }
 
     loop {
         unsafe {

@@ -303,6 +303,8 @@ static void drm_update_vblank_count(struct drm_device *dev, unsigned int pipe,
 	int framedur_ns = vblank->framedur_ns;
 	u32 max_vblank_count = drm_max_vblank_count(dev, pipe);
 
+	drm_info(dev, "I915_DIAG vblank_update_enter pipe=%u irq=%d max=%u\n",
+		 pipe, in_vblank_irq, max_vblank_count);
 	/*
 	 * Interrupts were disabled prior to this call, so deal with counter
 	 * wrap if needed.
@@ -316,9 +318,17 @@ static void drm_update_vblank_count(struct drm_device *dev, unsigned int pipe,
 	 * corresponding vblank timestamp.
 	 */
 	do {
+		drm_info(dev, "I915_DIAG vblank_counter1_enter\n");
 		cur_vblank = __get_vblank_counter(dev, pipe);
+		drm_info(dev, "I915_DIAG vblank_counter1_done value=%u\n",
+			 cur_vblank);
+		drm_info(dev, "I915_DIAG vblank_timestamp_enter\n");
 		rc = drm_get_last_vbltimestamp(dev, pipe, &t_vblank, in_vblank_irq);
+		drm_info(dev, "I915_DIAG vblank_timestamp_done precise=%d time=%lld\n",
+			 rc, (long long)t_vblank);
+		drm_info(dev, "I915_DIAG vblank_counter2_enter\n");
 	} while (cur_vblank != __get_vblank_counter(dev, pipe) && --count > 0);
+	drm_info(dev, "I915_DIAG vblank_counter2_done\n");
 
 	if (max_vblank_count) {
 		/* trust the hw counter when it's around */
@@ -369,6 +379,7 @@ static void drm_update_vblank_count(struct drm_device *dev, unsigned int pipe,
 
 	if (diff == 0) {
 		drm_WARN_ON_ONCE(dev, cur_vblank != vblank->last);
+		drm_info(dev, "I915_DIAG vblank_update_done diff=0\n");
 		return;
 	}
 
@@ -382,6 +393,7 @@ static void drm_update_vblank_count(struct drm_device *dev, unsigned int pipe,
 		t_vblank = 0;
 
 	store_vblank(dev, pipe, diff, t_vblank, cur_vblank);
+	drm_info(dev, "I915_DIAG vblank_update_done diff=%u\n", diff);
 }
 
 u64 drm_vblank_count(struct drm_device *dev, unsigned int pipe)

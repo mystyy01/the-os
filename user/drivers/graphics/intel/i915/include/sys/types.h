@@ -96,11 +96,7 @@ uvm_map(struct vm_map *map, unsigned long *addrp, unsigned long size,
 	return -1;
 }
 
-static inline void
-uao_reference(void *uao)
-{
-	(void)uao;
-}
+void uao_reference(void *uao);
 
 #define UVM_MAPFLAG(prot, maxprot, inherit, advice, flags) (0)
 #define MAP_INHERIT_SHARE 0
@@ -118,30 +114,11 @@ struct uvm_object {
 #define PGO_ALLPAGES 0x001
 #define PGO_FREE 0x008
 
-static inline int
-uvm_obj_wire(struct uvm_object *uo, uint64_t start, uint64_t end,
-    struct pglist *list)
-{
-	(void)uo;
-	(void)start;
-	(void)end;
-	(void)list;
-	return -1;
-}
-
-static inline void
-uvm_obj_unwire(struct uvm_object *uo, uint64_t start, uint64_t end)
-{
-	(void)uo;
-	(void)start;
-	(void)end;
-}
-
-static inline void
-uao_detach(struct uvm_object *uao)
-{
-	(void)uao;
-}
+struct pglist;
+int uvm_obj_wire(struct uvm_object *uo, uint64_t start, uint64_t end,
+    struct pglist *list);
+void uvm_obj_unwire(struct uvm_object *uo, uint64_t start, uint64_t end);
+void uao_detach(struct uvm_object *uao);
 
 static inline void
 uvm_obj_init(struct uvm_object *uo, const struct uvm_pagerops *ops, int refs)
@@ -156,13 +133,7 @@ uvm_obj_destroy(struct uvm_object *uo)
 	(void)uo;
 }
 
-static inline struct uvm_object *
-uao_create(uint64_t size, int flags)
-{
-	(void)size;
-	(void)flags;
-	return 0;
-}
+struct uvm_object *uao_create(uint64_t size, int flags);
 typedef int64_t daddr_t;
 typedef uint64_t blkcnt_t;
 typedef long off_t;
@@ -175,6 +146,10 @@ typedef char *caddr_t;
 typedef unsigned int uint;
 typedef unsigned short ushort;
 typedef unsigned long ulong;
+typedef uint8_t u_int8_t;
+typedef uint16_t u_int16_t;
+typedef uint32_t u_int32_t;
+typedef uint64_t u_int64_t;
 typedef unsigned long __uintptr_t;
 
 #include <sys/device.h>

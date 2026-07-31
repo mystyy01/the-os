@@ -237,10 +237,13 @@ __drm_fb_helper_restore_fbdev_mode_unlocked(struct drm_fb_helper *fb_helper,
 		 * to be held. But for forced restores we're intentionally
 		 * racing here, see drm_fb_helper_set_par().
 		 */
+		drm_info(fb_helper->dev, "I915_DIAG fb_restore_commit_enter force=1\n");
 		ret = drm_client_modeset_commit_locked(&fb_helper->client);
 	} else {
+		drm_info(fb_helper->dev, "I915_DIAG fb_restore_commit_enter force=0\n");
 		ret = drm_client_modeset_commit(&fb_helper->client);
 	}
+	drm_info(fb_helper->dev, "I915_DIAG fb_restore_commit_done ret=%d\n", ret);
 
 	do_delayed = fb_helper->delayed_hotplug;
 	if (do_delayed)

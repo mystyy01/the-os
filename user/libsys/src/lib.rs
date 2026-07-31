@@ -36,6 +36,79 @@ pub fn irq_pop(irq: usize) -> Option<u8> {
     Some(b)
 }
 
+const ULOG_OFF: usize = 0x57000;
+const ULOG_CAP: u32 = 0x8000;
+
+#[repr(C)]
+struct Ulog {
+    lock: AtomicU32,
+    head: AtomicU32,
+    tail: AtomicU32,
+    _pad: u32,
+    data: [u8; ULOG_CAP as usize],
+}
+
+fn ulog() -> &'static Ulog {
+    unsafe { &*((ARENA + ULOG_OFF as u64) as *const Ulog) }
+}
+
+fn ulog_data() -> *mut u8 {
+    (ARENA + (ULOG_OFF + 16) as u64) as *mut u8
+}
+
+fn ulog_append(b: &[u8]) {
+    let u = ulog();
+    while u.lock.swap(1, Ordering::Acquire) == 1 {
+        core::hint::spin_loop();
+    }
+    let head = u.head.load(Ordering::Relaxed);
+    let data = ulog_data();
+    let mut i: u32 = 0;
+    while (i as usize) < b.len() {
+        unsafe {
+            *data.add(((head.wrapping_add(i)) % ULOG_CAP) as usize) = b[i as usize];
+        }
+        i += 1;
+    }
+    u.head
+        .store(head.wrapping_add(b.len() as u32), Ordering::Release);
+    u.lock.store(0, Ordering::Release);
+}
+
+pub fn ulog_drain(out: &mut [u8]) -> usize {
+    let u = ulog();
+    while u.lock.swap(1, Ordering::Acquire) == 1 {
+        core::hint::spin_loop();
+    }
+    let head = u.head.load(Ordering::Relaxed);
+    let mut tail = u.tail.load(Ordering::Relaxed);
+    if head.wrapping_sub(tail) > ULOG_CAP {
+        tail = head.wrapping_sub(ULOG_CAP);
+    }
+    let data = ulog_data();
+    let mut n = 0usize;
+    while tail != head && n < out.len() {
+        out[n] = unsafe { *data.add((tail % ULOG_CAP) as usize) };
+        tail = tail.wrapping_add(1);
+        n += 1;
+    }
+    u.tail.store(tail, Ordering::Release);
+    u.lock.store(0, Ordering::Release);
+    n
+}
+
+pub fn kernel_crashlog_read(out: &mut [u8], offset: usize) -> usize {
+    unsafe {
+        syscall(
+            31,
+            out.as_mut_ptr() as u64,
+            out.len() as u64,
+            offset as u64,
+            0,
+        ) as usize
+    }
+}
+
 pub const SVC_VFS: u32 = 1;
 pub const SVC_ATA: u32 = 2;
 pub const SVC_FS: u32 = 3;
@@ -44,6 +117,7 @@ pub const SVC_ECHO: u32 = 5;
 pub const SVC_ECHO_LOCAL: u32 = 6;
 pub const SVC_INIT: u32 = 7;
 pub const SVC_PCI: u32 = 8;
+pub const SVC_CRASHLOG: u32 = 9;
 
 const EMPTY: u32 = 0;
 const REQ: u32 = 1;
@@ -105,9 +179,13 @@ pub const OP_READ: u8 = 3;
 pub const OP_WRITE: u8 = 4;
 pub const OP_OPEN: u8 = 5;
 pub const OP_IRQ: u8 = 6;
+pub const OP_KERNEL_CRASH: u8 = 7;
 pub const OP_ECHO: u8 = 7;
 pub const OP_ECHO_TS: u8 = 8;
 pub const OP_PCI_FIND: u8 = 9;
+pub const OP_CLOSE: u8 = 10;
+pub const OP_BWRITE: u8 = 11;
+pub const OP_SYNC: u8 = 12;
 
 pub const PP_BASE: u64 = ARENA + 0x60000;
 pub const PP_WARMUP: u64 = 256;
@@ -210,10 +288,20 @@ pub fn map_mmio(phys_addr: u64, page_count: u64) -> u64 {
     unsafe { syscall(22, phys_addr, page_count, 0, 0) }
 }
 
+pub fn fb_fill(color: u32) {
+    unsafe {
+        syscall(24, color as u64, 0, 0, 0);
+    }
+}
+
 pub fn alloc_dma(pages: u64) -> (u64, u64) {
     let mut phys: u64 = 0;
     let virt = unsafe { syscall(23, pages, &mut phys as *mut u64 as u64, 0, 0) };
     (virt, phys)
+}
+
+pub fn total_ram_pages() -> u64 {
+    unsafe { syscall(28, 0, 0, 0, 0) }
 }
 
 pub fn handoff_to_service(svc: u32) -> u64 {
@@ -233,9 +321,17 @@ fn notify_if_blocked(svc: u32) {
     }
 }
 
-const MAX_USER_MAILBOXES: usize = 48;
+const MAX_USER_MAILBOXES: usize = 47;
+
+static mut SERVICE_CONN: [i32; MAX_SERVICES] = [-1i32; MAX_SERVICES];
 
 pub fn mbox_connect(service_id: u32) -> usize {
+    unsafe {
+        if (service_id as usize) < MAX_SERVICES && SERVICE_CONN[service_id as usize] >= 0 {
+            return SERVICE_CONN[service_id as usize] as usize;
+        }
+    }
+
     let raw = alloc_next().fetch_add(1, Ordering::Relaxed) as usize;
     let idx = if raw >= MAX_USER_MAILBOXES {
         MAX_USER_MAILBOXES - 1
@@ -253,6 +349,9 @@ pub fn mbox_connect(service_id: u32) -> usize {
         let slot = inbox_count(service_id).fetch_add(1, Ordering::Relaxed) as usize;
         if slot < INBOX_CAP {
             inboxes()[service_id as usize].idx[slot] = idx as u32;
+        }
+        unsafe {
+            SERVICE_CONN[service_id as usize] = idx as i32;
         }
     }
     idx
@@ -494,6 +593,7 @@ pub fn print(s: &str) {
     unsafe {
         syscall(8, s.as_ptr() as u64, s.len() as u64, 0, 0);
     }
+    ulog_append(s.as_bytes());
 }
 
 pub fn print_hex(mut n: u32) {
@@ -518,6 +618,29 @@ pub fn spawn(bytes: &[u8], cpu_id: u8) -> i32 {
     }
 }
 
+pub fn spawn_thread(entry: extern "C" fn() -> !, stack_order: u64, priority: u64) -> i32 {
+    unsafe { syscall(25, entry as u64, stack_order, priority, 0) as i32 }
+}
+
+pub const SLEEP_WOKEN: u64 = 0;
+pub const SLEEP_TIMED_OUT: u64 = 1;
+
+pub fn sys_sleep(ident: u64, timeout_ns: u64) -> u64 {
+    unsafe { syscall(26, ident, timeout_ns, 0, 0) }
+}
+
+pub fn sys_wakeup(ident: u64) {
+    unsafe {
+        syscall(27, ident, 0, 0, 0);
+    }
+}
+
+pub fn set_msi_waker(ident: u64) {
+    unsafe {
+        syscall(29, ident, 0, 0, 0);
+    }
+}
+
 pub fn vfs_resolve(path: &[u8]) -> u32 {
     let idx = mbox_connect(SVC_VFS);
     let mut req = [0u8; 256];
@@ -538,7 +661,7 @@ pub fn vfs_bind(path: &[u8], service_id: u32) -> i32 {
     i32::from_le_bytes([out[0], out[1], out[2], out[3]])
 }
 
-pub fn open(path: &[u8]) -> i32 {
+fn open_mode(path: &[u8], flags: u8) -> i32 {
     let sid = vfs_resolve(path);
     if sid == 0 {
         return -1;
@@ -546,9 +669,10 @@ pub fn open(path: &[u8]) -> i32 {
     let conn = mbox_connect(sid);
     let mut req = [0u8; 256];
     req[0] = OP_OPEN;
-    req[1..1 + path.len()].copy_from_slice(path);
+    req[1] = flags;
+    req[2..2 + path.len()].copy_from_slice(path);
     let mut out = [0u8; 4];
-    mbox_call(conn, &req[..1 + path.len()], &mut out);
+    mbox_call(conn, &req[..2 + path.len()], &mut out);
     let handle = i32::from_le_bytes([out[0], out[1], out[2], out[3]]);
     if handle < 0 {
         return -1;
@@ -566,6 +690,34 @@ pub fn open(path: &[u8]) -> i32 {
         }
     }
     -1
+}
+
+pub fn open(path: &[u8]) -> i32 {
+    open_mode(path, 0)
+}
+
+pub fn create(path: &[u8]) -> i32 {
+    open_mode(path, 1)
+}
+
+pub fn create_trunc(path: &[u8]) -> i32 {
+    open_mode(path, 2)
+}
+
+pub fn close(fd: i32) {
+    unsafe {
+        if fd < 0 || fd as usize >= 256 || !FD_TABLE[fd as usize].used {
+            return;
+        }
+        let conn = FD_TABLE[fd as usize].conn;
+        let handle = FD_TABLE[fd as usize].handle;
+        let mut req = [0u8; 5];
+        req[0] = OP_CLOSE;
+        req[1..5].copy_from_slice(&handle.to_le_bytes());
+        let mut out = [0u8; 4];
+        mbox_call(conn, &req, &mut out);
+        FD_TABLE[fd as usize] = EMPTY_FD;
+    }
 }
 pub fn read(fd: i32, buf: &mut [u8]) -> i32 {
     unsafe {
@@ -597,13 +749,23 @@ pub fn write(fd: i32, buf: &[u8]) -> i32 {
             return -1;
         }
         let conn = FD_TABLE[fd as usize].conn;
-        let mut req = [0u8; 256];
-        req[0] = OP_WRITE;
-        let n = core::cmp::min(buf.len(), 255);
-        req[1..1 + n].copy_from_slice(&buf[..n]);
-        let mut out = [0u8; 4];
-        mbox_call(conn, &req[..1 + n], &mut out);
-        i32::from_le_bytes([out[0], out[1], out[2], out[3]])
+        let handle = FD_TABLE[fd as usize].handle;
+        let mut total = 0usize;
+        while total < buf.len() {
+            let chunk = core::cmp::min(buf.len() - total, BUF_SIZE - 5);
+            let mut req = [0u8; BUF_SIZE];
+            req[0] = OP_WRITE;
+            req[1..5].copy_from_slice(&handle.to_le_bytes());
+            req[5..5 + chunk].copy_from_slice(&buf[total..total + chunk]);
+            let mut out = [0u8; 4];
+            mbox_call(conn, &req[..5 + chunk], &mut out);
+            let n = i32::from_le_bytes([out[0], out[1], out[2], out[3]]);
+            if n <= 0 {
+                break;
+            }
+            total += n as usize;
+        }
+        total as i32
     }
 }
 

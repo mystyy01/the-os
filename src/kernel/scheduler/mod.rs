@@ -7,6 +7,8 @@ use core::sync::atomic::{AtomicPtr, Ordering, fence};
 const KSTACK_ORDER: usize = 4;
 const KSTACK_SIZE: u64 = 4096 << KSTACK_ORDER;
 
+const THREAD_STACK_VBASE: u64 = 0x6000_0000;
+
 use crate::{
     cpu::{get_current_task, set_current_task, set_stack_top},
     gdt,
@@ -39,6 +41,8 @@ pub struct Task {
     pub pid: i32,
     pub ipc_con: [Option<IPCConnection>; MAX_IPC_CONNECTIONS_PER_TASK],
     pub dma_bump_offset: u64,
+    pub mmio_bump_offset: u64,
+    pub thread_stack_bump_offset: u64,
 }
 
 pub const MAX_TASKS_PER_PRIORITY: usize = 16;
@@ -166,6 +170,7 @@ pub fn block_current() {
             gdt::set_rsp0((*next).kstack_top);
 
             switch_to(&raw mut (*prev).ksp, (*next).ksp);
+            core::ptr::write_volatile(&mut (*prev).wake_pending, false);
         }
     }
 }
@@ -286,6 +291,8 @@ pub fn spawn_task(entry: fn(), priority: u8) {
             pid: next_pid(),
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
             dma_bump_offset: 0,
+            mmio_bump_offset: 0,
+            thread_stack_bump_offset: 0,
         };
         let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for (i, t) in s.queues[priority as usize].iter().enumerate() {
@@ -325,6 +332,8 @@ pub fn spawn_idle(entry: fn()) {
             pid: IDLE_PID,
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
             dma_bump_offset: 0,
+            mmio_bump_offset: 0,
+            thread_stack_bump_offset: 0,
         };
         let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for (i, t) in s.queues[0 as usize].iter().enumerate() {
@@ -362,9 +371,67 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8, 
             pid: next_pid(),
             ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
             dma_bump_offset: 0,
+            mmio_bump_offset: 0,
+            thread_stack_bump_offset: 0,
         };
 
         let s = &mut SCHEDULERS[cpu_id as usize];
+        for (i, t) in s.queues[priority as usize].iter().enumerate() {
+            if t.is_none() {
+                s.queues[priority as usize][i] = Some(task);
+                break;
+            }
+        }
+        return task.pid;
+    }
+}
+
+pub fn spawn_thread_in(entry: u64, stack_order: usize, priority: u8) -> i32 {
+    unsafe {
+        let cur = get_current_task();
+        let cr3 = (*cur).cr3;
+
+        let stack_size = 0x1000u64 << stack_order;
+        let vbase = THREAD_STACK_VBASE + (*cur).thread_stack_bump_offset;
+        (*cur).thread_stack_bump_offset += stack_size + 0x1000;
+
+        let stack_phys = pmm::alloc_pages(stack_order) as u64;
+        let pml4 = cr3 as *mut u64;
+        let mut i: u64 = 0;
+        while i < (stack_size / 0x1000) {
+            vmm::map_page(pml4, vbase + i * 0x1000, stack_phys + i * 0x1000, 0x07);
+            i += 1;
+        }
+        let user_stack_top = vbase + stack_size;
+
+        let kstack_phys = pmm::alloc_pages(KSTACK_ORDER) as u64;
+        let top = (crate::vmm::phys_to_virt(kstack_phys) + KSTACK_SIZE) as *mut u64;
+
+        *top.sub(1) = user_entry_bouncy_trampoline_lol as u64;
+        *top.sub(2) = 0;
+        *top.sub(3) = 0;
+        *top.sub(4) = 0;
+        *top.sub(5) = 0;
+        *top.sub(6) = user_stack_top;
+        *top.sub(7) = entry;
+        let ksp = top.sub(7) as u64;
+
+        let task = Task {
+            state: TaskState::Ready,
+            wake_pending: false,
+            priority: priority,
+            stack: kstack_phys as *mut u8,
+            ksp: ksp,
+            kstack_top: top as u64,
+            cr3: cr3,
+            pid: next_pid(),
+            ipc_con: [None; MAX_IPC_CONNECTIONS_PER_TASK],
+            dma_bump_offset: 0,
+            mmio_bump_offset: 0,
+            thread_stack_bump_offset: 0,
+        };
+
+        let s = &mut SCHEDULERS[crate::cpu::id() as usize];
         for (i, t) in s.queues[priority as usize].iter().enumerate() {
             if t.is_none() {
                 s.queues[priority as usize][i] = Some(task);
@@ -434,10 +501,31 @@ pub unsafe fn kill_current_task() {
     }
 }
 
+unsafe fn cr3_is_shared(cr3: u64, exclude: *mut Task) -> bool {
+    unsafe {
+        for cpu in 0..MAX_CPUS {
+            let s = &mut SCHEDULERS[cpu];
+            for priority in 0..PRIORITY_LEVELS {
+                for slot in 0..MAX_TASKS_PER_PRIORITY {
+                    if let Some(t) = s.queues[priority][slot].as_mut() {
+                        let tp = t as *mut Task;
+                        if tp != exclude && (*t).cr3 == cr3 {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 pub unsafe fn cleanup_and_exit_task(task: *mut Task) {
     unsafe {
         core::arch::asm!("mov cr3, {}", in(reg) cpu::get_kernel_cr3());
-        vmm::free_table((*task).cr3, 4);
+        if !cr3_is_shared((*task).cr3, task) {
+            vmm::free_table((*task).cr3, 4);
+        }
         if !(*task).stack.is_null() {
             pmm::free_pages(KSTACK_ORDER, (*task).stack as u64);
         }

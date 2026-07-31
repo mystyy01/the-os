@@ -646,27 +646,36 @@ static int i915_driver_register(struct drm_i915_private *dev_priv)
 		i915_gem_driver_unregister(dev_priv);
 		return ret;
 	}
+	printf("i915: stage register_drm_dev_done\n");
 
 	i915_debugfs_register(dev_priv);
 	i915_setup_sysfs(dev_priv);
+	printf("i915: stage register_sysfs_done\n");
 
 	/* Depends on sysfs having been initialized */
 	i915_perf_register(dev_priv);
+	printf("i915: stage register_perf_done\n");
 
 	for_each_gt(gt, dev_priv, i)
 		intel_gt_driver_register(gt);
+	printf("i915: stage register_gt_done\n");
 
 	intel_pxp_debugfs_register(dev_priv->pxp);
 
 	i915_hwmon_register(dev_priv);
+	printf("i915: stage register_hwmon_done\n");
 
 	intel_display_driver_register(display);
+	printf("i915: stage register_display_done\n");
 
 	intel_power_domains_enable(display);
+	printf("i915: stage register_power_domains_done\n");
 	intel_runtime_pm_enable(&dev_priv->runtime_pm);
+	printf("i915: stage register_runtime_pm_done\n");
 
 	if (i915_switcheroo_register(dev_priv))
 		drm_err(&dev_priv->drm, "Failed to register vga switcheroo!\n");
+	printf("i915: stage register_switcheroo_done\n");
 
 	return 0;
 }
@@ -713,6 +722,9 @@ i915_print_iommu_status(struct drm_i915_private *i915, struct drm_printer *p)
 
 static void i915_welcome_messages(struct drm_i915_private *dev_priv)
 {
+#ifdef I915_SHIM_DISPLAY_ONLY
+	printf("i915: stage welcome_debug_dump_skipped\n");
+#else
 	if (drm_debug_enabled(DRM_UT_DRIVER)) {
 		struct drm_printer p = drm_dbg_printer(&dev_priv->drm, DRM_UT_DRIVER,
 						       "device info:");
@@ -733,6 +745,7 @@ static void i915_welcome_messages(struct drm_i915_private *dev_priv)
 		for_each_gt(gt, dev_priv, i)
 			intel_gt_info_print(&gt->info, &p);
 	}
+#endif
 
 	if (IS_ENABLED(CONFIG_DRM_I915_DEBUG))
 		drm_info(&dev_priv->drm, "DRM_I915_DEBUG enabled\n");
@@ -863,16 +876,21 @@ int i915_driver_probe(struct drm_i915_private *i915, const struct pci_device_id 
 	ret = i915_driver_register(i915);
 	if (ret)
 		goto out_cleanup_gem;
+	printf("i915: stage probe_register_done\n");
 
 #ifdef __OpenBSD__
 	inteldrm_init_backlight(i915);
+	printf("i915: stage probe_backlight_done\n");
 #endif
 
 	enable_rpm_wakeref_asserts(&i915->runtime_pm);
+	printf("i915: stage probe_rpm_asserts_done\n");
 
 	i915_welcome_messages(i915);
+	printf("i915: stage probe_after_welcome\n");
 
 	i915->do_release = true;
+	printf("i915: stage probe_return\n");
 
 	return 0;
 
@@ -2322,14 +2340,6 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 
 	dev_priv->display = display;
 
-	/*
-	 * with GuC submission, init sometimes fails on Alder Lake-P
-	 * and Raptor Lake-S, too early for IS_ALDERLAKE
-	 */
-	if (info->platform == INTEL_ALDERLAKE_P ||
-	    info->platform == INTEL_ALDERLAKE_S)
-		dev_priv->params.enable_guc = ENABLE_GUC_LOAD_HUC;
-
 	mmio_bar = (GRAPHICS_VER(dev_priv) == 2) ? 0x14 : 0x10;
 
 	/* from intel_uncore_setup_mmio() */
@@ -2446,11 +2456,20 @@ inteldrm_attachhook(struct device *self)
 	}
 	inteldrm_refcnt++;
 
-	if (i915_driver_probe(dev_priv, id))
+	printf("i915: stage attachhook_before_probe\n");
+	if (i915_driver_probe(dev_priv, id)) {
+		printf("i915: stage attachhook_probe_failed\n");
 		goto fail;
+	}
 
-	if (ri->ri_bits == NULL)
+	printf("i915: stage attachhook_after_probe bits=%lx width=%d height=%d depth=%d stride=%d\n",
+	    (unsigned long)ri->ri_bits, ri->ri_width, ri->ri_height,
+	    ri->ri_depth, ri->ri_stride);
+
+	if (ri->ri_bits == NULL) {
+		printf("i915: stage attachhook_no_fb\n");
 		goto fail;
+	}
 
 	printf("%s: %dx%d, %dbpp\n", dev_priv->sc_dev.dv_xname,
 	    ri->ri_width, ri->ri_height, ri->ri_depth);
@@ -2501,11 +2520,14 @@ inteldrm_attachhook(struct device *self)
 
 	config_found_sm(self, &aa, wsemuldisplaydevprint,
 	    wsemuldisplaydevsubmatch);
+	printf("i915: stage attachhook_success\n");
 	return;
 
 fail:
+	printf("i915: stage attachhook_fail_enter\n");
 	inteldrm_fatal_error = 1;
 	inteldrm_forcedetach(dev_priv);
+	printf("i915: stage attachhook_fail_return\n");
 }
 
 int

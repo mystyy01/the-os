@@ -164,6 +164,11 @@ dev_dbg_ratelimited(struct device *dev, const char *fmt, ...)
 static inline const char *
 dev_driver_string(struct device *dev)
 {
+	if (dev == NULL || dev->dv_cfdata == NULL ||
+	    dev->dv_cfdata->cf_driver == NULL ||
+	    dev->dv_cfdata->cf_driver->cd_name == NULL)
+		return "drm";
+
 	return dev->dv_cfdata->cf_driver->cd_name;
 }
 

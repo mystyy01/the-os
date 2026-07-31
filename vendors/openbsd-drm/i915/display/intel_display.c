@@ -6537,6 +6537,7 @@ int intel_atomic_check(struct drm_device *dev,
 				      "modeset" : "fastset");
 	}
 
+	drm_info(display->drm, "I915_DIAG atomic_check_done ret=0\n");
 	return 0;
 
  fail:
@@ -6558,7 +6559,9 @@ static int intel_atomic_prepare_commit(struct intel_atomic_state *state)
 {
 	int ret;
 
+	drm_info(state->base.dev, "I915_DIAG prepare_commit_enter\n");
 	ret = drm_atomic_helper_prepare_planes(state->base.dev, &state->base);
+	drm_info(state->base.dev, "I915_DIAG prepare_commit_done ret=%d\n", ret);
 	if (ret < 0)
 		return ret;
 

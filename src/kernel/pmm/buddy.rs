@@ -38,6 +38,9 @@ fn free_page(addr: u64, order: usize) -> () {
 
 pub fn alloc_pages_inner(order: usize) -> *mut u8 {
     unsafe {
+        if order >= MAX_ORDER {
+            return null_mut();
+        }
         if !BUDDY.free_lists[order].is_null() {
             let free_block = BUDDY.free_lists[order];
             BUDDY.free_lists[order] = (*free_block).next;
@@ -129,9 +132,16 @@ fn add_region(base: u64, size: u64) -> () {
             continue;
         }
         free_page(base, best_order);
+        unsafe {
+            BUDDY.total_memory += PAGE_SIZE << best_order;
+        }
         base += PAGE_SIZE << best_order;
         remaining -= PAGE_SIZE << best_order;
     }
+}
+
+pub fn total_pages() -> u64 {
+    unsafe { BUDDY.total_memory / PAGE_SIZE }
 }
 
 pub fn init(multiboot2_info: *const u8) -> () {

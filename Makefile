@@ -6,6 +6,7 @@ BUILD_DIR = build
 LWEXT4_DIR = vendors/lwext4
 LWEXT4_BUILD = $(BUILD_DIR)/lwext4
 LWEXT4_LIB = $(LWEXT4_BUILD)/src/liblwext4.a
+LWEXT4_INPUTS = $(shell find $(LWEXT4_DIR)/src $(LWEXT4_DIR)/include -type f) $(LWEXT4_DIR)/CMakeLists.txt $(LWEXT4_DIR)/toolchain/x86_64-none.cmake
 ISO_DIR = isodir
 BOOT_ASM = src/boot/boot.asm
 BOOT_OBJ = $(BUILD_DIR)/boot.o
@@ -35,7 +36,7 @@ endef
 
 all: $(ISO)
 
-$(LWEXT4_LIB):
+$(LWEXT4_LIB): $(LWEXT4_INPUTS)
 	mkdir -p $(LWEXT4_BUILD)
 	cd $(LWEXT4_BUILD) && cmake $(CURDIR)/$(LWEXT4_DIR) \
 		-DCMAKE_TOOLCHAIN_FILE=$(CURDIR)/$(LWEXT4_DIR)/toolchain/x86_64-none.cmake \
@@ -56,6 +57,8 @@ $(BUILD_DIR)/ap_trampoline.bin: src/boot/ap_trampoline_thingy_haha_i_love_the_wo
 
 user: $(LWEXT4_LIB)
 	$(call build_user,vfs)
+	$(call build_user,logger)
+	$(call build_user,crashlogger)
 	$(call build_user,kbd)
 	$(call build_user,shell)
 	$(call build_user,ata)
@@ -65,6 +68,8 @@ user: $(LWEXT4_LIB)
 	$(call build_user,bench)
 	$(call build_user,pci)
 	$(call build_user,usb)
+	$(call build_user,i915)
+	$(call build_user,threadtest)
 	$(call build_user,the-initializer)
 
 rust: user
@@ -94,6 +99,42 @@ disk.img: $(FSROOT)/hello.txt fsroot-bin
 	truncate -s 64M disk.img
 	mke2fs -q -t ext4 -F -O ^64bit,^metadata_csum,^orphan_file,^has_journal -d $(FSROOT) disk.img
 
+USB_IMG = usb.img
+ESP_IMG = $(BUILD_DIR)/esp.img
+P2_IMG = $(BUILD_DIR)/ext4part.img
+GRUB_EFI = $(BUILD_DIR)/BOOTX64.EFI
+GRUB_EMBED = $(BUILD_DIR)/grub-embed.cfg
+
+.PHONY: usb-img
+
+$(GRUB_EFI):
+	mkdir -p $(BUILD_DIR)
+	printf 'insmod part_gpt\ninsmod fat\ninsmod ext2\ninsmod all_video\nsearch --no-floppy --file --set=root /boot/kernel.bin\nmultiboot2 /boot/kernel.bin\nboot\n' > $(GRUB_EMBED)
+	grub-mkstandalone -O x86_64-efi -o $(GRUB_EFI) "boot/grub/grub.cfg=$(GRUB_EMBED)"
+
+$(ESP_IMG): $(GRUB_EFI) $(KERNEL_BIN)
+	rm -f $(ESP_IMG)
+	truncate -s 48M $(ESP_IMG)
+	mkfs.fat -F 32 $(ESP_IMG)
+	mmd -i $(ESP_IMG) ::/EFI ::/EFI/BOOT ::/boot
+	mcopy -i $(ESP_IMG) $(GRUB_EFI) ::/EFI/BOOT/BOOTX64.EFI
+	mcopy -i $(ESP_IMG) $(KERNEL_BIN) ::/boot/kernel.bin
+
+$(P2_IMG): $(FSROOT)/hello.txt fsroot-bin
+	rm -f $(P2_IMG)
+	truncate -s 64M $(P2_IMG)
+	mke2fs -q -t ext4 -F -O ^64bit,^metadata_csum,^orphan_file,^has_journal -d $(FSROOT) $(P2_IMG)
+
+usb-img: $(USB_IMG)
+
+$(USB_IMG): $(ESP_IMG) $(P2_IMG)
+	rm -f $(USB_IMG)
+	truncate -s 120M $(USB_IMG)
+	printf 'label: gpt\nunit: sectors\nstart=2048, size=98304, type=U\nstart=100352, size=131072, type=L\n' | sfdisk $(USB_IMG)
+	dd if=$(ESP_IMG) of=$(USB_IMG) bs=1M seek=1 conv=notrunc
+	dd if=$(P2_IMG) of=$(USB_IMG) bs=1M seek=49 conv=notrunc
+	@echo "usb.img ready: p1 ESP@1MiB(48M) p2 ext4@49MiB(64M). ext4 part_offset = 51380224 bytes."
+
 $(FSROOT)/hello.txt:
 	mkdir -p $(FSROOT)
 	printf 'hello from ext4!\n' > $(FSROOT)/hello.txt
@@ -101,7 +142,10 @@ $(FSROOT)/hello.txt:
 QEMU = qemu-system-x86_64
 QEMU_SMP = 4,sockets=1,cores=4,threads=1
 QEMU_MEM = 8G
-QEMU_BASE = -cdrom $(ISO) -serial stdio -drive file=disk.img,format=raw,if=ide
+QEMU_BASE = -cdrom $(ISO) -serial stdio \
+	-device qemu-xhci,id=xhci \
+	-drive file=disk.img,format=raw,if=none,id=usbstick,cache=writeback \
+	-device usb-storage,bus=xhci.0,drive=usbstick,removable=on
 
 run: $(ISO) disk.img
 	$(QEMU) -enable-kvm -cpu host -smp $(QEMU_SMP) -m $(QEMU_MEM) $(QEMU_BASE)

@@ -456,9 +456,17 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
 bool intel_crtc_get_vblank_timestamp(struct drm_crtc *crtc, int *max_error,
 				     ktime_t *vblank_time, bool in_vblank_irq)
 {
-	return drm_crtc_vblank_helper_get_vblank_timestamp_internal(
+	bool ret;
+
+	drm_info(crtc->dev, "I915_DIAG intel_vblank_timestamp_enter pipe=%u\n",
+		 drm_crtc_index(crtc));
+	ret = drm_crtc_vblank_helper_get_vblank_timestamp_internal(
 		crtc, max_error, vblank_time, in_vblank_irq,
 		i915_get_crtc_scanoutpos);
+	drm_info(crtc->dev,
+		 "I915_DIAG intel_vblank_timestamp_done ret=%d time=%lld\n",
+		 ret, (long long)*vblank_time);
+	return ret;
 }
 
 int intel_get_crtc_scanline(struct intel_crtc *crtc)

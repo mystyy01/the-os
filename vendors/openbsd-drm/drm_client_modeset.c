@@ -1050,6 +1050,8 @@ static int drm_client_modeset_commit_atomic(struct drm_client_dev *client, bool 
 	struct drm_mode_set *mode_set;
 	int ret;
 
+	drm_info(dev, "I915_DIAG client_atomic_enter active=%d check=%d\n",
+		 active, check);
 	drm_modeset_acquire_init(&ctx, 0);
 
 	state = drm_atomic_state_alloc(dev);
@@ -1108,10 +1110,12 @@ retry:
 		}
 	}
 
+	drm_info(dev, "I915_DIAG client_atomic_state_ready check=%d\n", check);
 	if (check)
 		ret = drm_atomic_check_only(state);
 	else
 		ret = drm_atomic_commit(state);
+	drm_info(dev, "I915_DIAG client_atomic_call_done ret=%d\n", ret);
 
 out_state:
 	if (ret == -EDEADLK)

@@ -4,4 +4,5 @@ isodir/boot/kernel.bin
 kernel.iso
 user/dist/
 disk.img
+usb.img
 vendors/lwext4/

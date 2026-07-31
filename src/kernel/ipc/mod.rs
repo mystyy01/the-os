@@ -71,7 +71,9 @@ pub const BUFPOOL_OFF: usize = 0x10000;
 pub const BUF_SIZE: usize = 4096;
 pub const MAX_MAILBOXES: usize = 64;
 pub const OP_IRQ: u8 = 6;
+pub const OP_KERNEL_CRASH: u8 = 7;
 pub const MBOX_REQ: u32 = 1;
+const KERNEL_CRASH_MBOX: usize = 47;
 
 pub const IRQRING_OFF: usize = 0x50000;
 pub const IRQRING_CAP: usize = 256;
@@ -107,6 +109,8 @@ static mut SERVERS: [ServerReg; MAX_SERVICES] = [ServerReg {
     core: 0,
     used: false,
 }; MAX_SERVICES];
+static CRASH_INBOX_ADDED: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
 
 pub fn register_server(service_id: u32, pid: i32, core: u32) {
     if (service_id as usize) < MAX_SERVICES {
@@ -149,6 +153,39 @@ pub fn wake_server(service_id: u32) {
         }
         crate::lapic::send_ipi(crate::cpu::apic_id_of(s.core), 64);
     }
+}
+
+pub fn notify_kernel_crash(service_id: u32) -> bool {
+    if service_id as usize >= MAX_SERVICES {
+        return false;
+    }
+    if server_pid(service_id) < 0 {
+        return false;
+    }
+    unsafe {
+        if !CRASH_INBOX_ADDED.swap(true, Ordering::AcqRel) {
+            inbox_add(service_id, KERNEL_CRASH_MBOX as u32);
+        }
+
+        let mbox_phys =
+            ARENA_PHYS + MBOX_OFF as u64 + (KERNEL_CRASH_MBOX * 64) as u64;
+        let buf_phys =
+            ARENA_PHYS + BUFPOOL_OFF as u64 + (KERNEL_CRASH_MBOX * BUF_SIZE) as u64;
+        let mbox = crate::vmm::phys_to_virt(mbox_phys) as *mut Mailbox;
+        let buf = crate::vmm::phys_to_virt(buf_phys) as *mut u8;
+
+        *buf = OP_KERNEL_CRASH;
+        (*mbox).client_id = 0;
+        (*mbox).service_id = service_id;
+        (*mbox).msg_offset =
+            (BUFPOOL_OFF + KERNEL_CRASH_MBOX * BUF_SIZE) as u32;
+        (*mbox).len = 1;
+        (*mbox).client_core = crate::cpu::id();
+        fence(Ordering::Release);
+        (*mbox).status = MBOX_REQ;
+    }
+    wake_server(service_id);
+    true
 }
 
 pub fn inbox_has_req(service_id: u32) -> bool {

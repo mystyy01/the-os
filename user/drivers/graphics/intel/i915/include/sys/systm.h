@@ -40,14 +40,7 @@ assertwaitok(void)
 {
 }
 
-static inline int
-loadfirmware(const char *name, unsigned char **bufp, size_t *buflen)
-{
-	(void)name;
-	(void)bufp;
-	(void)buflen;
-	return ENOENT;
-}
+int loadfirmware(const char *name, unsigned char **bufp, size_t *buflen);
 
 int printf(const char *fmt, ...);
 int vprintf(const char *fmt, va_list ap);

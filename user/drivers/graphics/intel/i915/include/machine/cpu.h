@@ -24,6 +24,7 @@ struct cpu_info {
 	unsigned int ci_feature_sefflags_ebx;
 	unsigned int ci_cflushsz;
 	unsigned int ci_cpuid;
+	unsigned int ci_family;
 	int ci_idepth;
 	int ci_inatomic;
 	struct schedstate_percpu ci_schedstate;
@@ -70,6 +71,8 @@ cpu_ecxfeature_get(void)
 	return ecx;
 }
 #define cpu_ecxfeature (cpu_ecxfeature_get())
+
+extern int cpuspeed;
 
 static inline int
 cpu_number(void)

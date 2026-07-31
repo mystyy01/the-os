@@ -20,12 +20,15 @@ task_set(struct task *t, void (*func)(void *), void *arg)
 	t->t_pending = 0;
 }
 
+extern void i915_task_add(void *owner, void (*func)(void *), void *arg);
+extern int i915_task_del(void *owner);
+
 static inline int
 task_add(struct taskq *tq, struct task *t)
 {
 	(void)tq;
-	t->t_pending = 0;
-	t->t_func(t->t_arg);
+	t->t_pending = 1;
+	i915_task_add(t, t->t_func, t->t_arg);
 	return 1;
 }
 
@@ -33,8 +36,8 @@ static inline int
 task_del(struct taskq *tq, struct task *t)
 {
 	(void)tq;
-	(void)t;
-	return 0;
+	t->t_pending = 0;
+	return i915_task_del(t);
 }
 
 #define task_pending(t) ((t)->t_pending)

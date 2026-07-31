@@ -3,6 +3,7 @@ use crate::io::outb;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 static SERIAL_LOCK: AtomicBool = AtomicBool::new(false);
+static CRASH_MODE: AtomicBool = AtomicBool::new(false);
 
 pub fn lock() {
     while SERIAL_LOCK.swap(true, Ordering::Acquire) {}
@@ -50,13 +51,27 @@ fn vga_putc(byte: u8) {
 }
 
 pub fn write_byte(byte: u8) {
-    while inb(0x3F8 + 5) & 0x20 == 0 {}
-    outb(0x3F8, byte);
     if crate::fb::present() {
-        crate::fb::con_putc(byte);
+        if CRASH_MODE.load(Ordering::Acquire) {
+            crate::fb::crash_putc(byte);
+        } else {
+            crate::fb::con_putc(byte);
+        }
     } else {
         vga_putc(byte);
     }
+    if inb(0x3F8 + 5) & 0x20 != 0 {
+        outb(0x3F8, byte);
+    }
+}
+
+pub fn begin_crash_output() -> bool {
+    SERIAL_LOCK.store(false, Ordering::Release);
+    let first = !CRASH_MODE.swap(true, Ordering::AcqRel);
+    if first && crate::fb::present() {
+        crate::fb::crash_begin();
+    }
+    first
 }
 
 pub fn write_str_raw(s: &str) {

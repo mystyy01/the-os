@@ -12,6 +12,8 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", csrc_dir.display());
     println!("cargo:rerun-if-changed={}", include_dir.display());
+    println!("cargo:rerun-if-changed={}", compat_include_dir.display());
+    println!("cargo:rerun-if-changed={}", vdrm_dir.display());
 
     let mut objects = Vec::new();
 
@@ -88,6 +90,7 @@ fn main() {
     sources.push(vdrm_dir.join("i915/display/intel_bios.c"));
     sources.push(vdrm_dir.join("i915/display/intel_hdcp.c"));
     sources.push(vdrm_dir.join("i915/gt/intel_gt.c"));
+    sources.push(vdrm_dir.join("i915/gt/intel_sa_media.c"));
     sources.push(vdrm_dir.join("i915/intel_region_ttm.c"));
     sources.push(vdrm_dir.join("i915/intel_runtime_pm.c"));
     sources.push(vdrm_dir.join("i915/i915_vgpu.c"));
@@ -318,6 +321,66 @@ fn main() {
     sources.push(vdrm_dir.join("i915/intel_wakeref.c"));
     sources.push(vdrm_dir.join("i915/soc/intel_rom.c"));
     sources.push(vdrm_dir.join("linux_radix.c"));
+    sources.push(vdrm_dir.join("drm_buddy.c"));
+    sources.push(vdrm_dir.join("i915/i915_ttm_buddy_manager.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_guc.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_uc.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_gsc_uc.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_uc_fw.c"));
+    sources.push(vdrm_dir.join("i915/gt/intel_lrc.c"));
+    sources.push(vdrm_dir.join("i915/gt/intel_execlists_submission.c"));
+    sources.push(vdrm_dir.join("i915/gt/intel_gt_pm_irq.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_guc_ct.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_guc_log.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_guc_slpc.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_gsc_proxy.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_guc_ads.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen8_engine_cs.c"));
+    sources.push(vdrm_dir.join("i915/gt/agp_intel_gtt.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_guc_capture.c"));
+    sources.push(vdrm_dir.join("i915/i915_deps.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_guc_rc.c"));
+    sources.push(vdrm_dir.join("i915/i915_timer_util.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen6_ppgtt.c"));
+    sources.push(vdrm_dir.join("i915/gt/intel_engine_pm.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_huc_fw.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_gsc_uc_heci_cmd_submit.c"));
+    sources.push(vdrm_dir.join("clients/drm_fbdev_client.c"));
+    sources.push(vdrm_dir.join("i915/display/intel_display_snapshot.c"));
+    sources.push(vdrm_dir.join("i915/display/intel_hdcp_gsc.c"));
+    sources.push(vdrm_dir.join("i915/gt/intel_llc.c"));
+    sources.push(vdrm_dir.join("i915/gt/intel_ring_submission.c"));
+    sources.push(vdrm_dir.join("i915/gt/intel_gt_ccs_mode.c"));
+    sources.push(vdrm_dir.join("i915/gt/uc/intel_guc_fw.c"));
+    sources.push(vdrm_dir.join("i915/display/dvo_sil164.c"));
+    sources.push(vdrm_dir.join("i915/display/dvo_ch7xxx.c"));
+    sources.push(vdrm_dir.join("i915/display/dvo_ivch.c"));
+    sources.push(vdrm_dir.join("i915/display/dvo_ch7017.c"));
+    sources.push(vdrm_dir.join("i915/display/dvo_ns2501.c"));
+    sources.push(vdrm_dir.join("i915/display/dvo_tfp410.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen2_engine_cs.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen6_engine_cs.c"));
+    sources.push(vdrm_dir.join("i915/i915_mitigations.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen7_renderclear.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen8_ppgtt.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen6_renderstate.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen7_renderstate.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen8_renderstate.c"));
+    sources.push(vdrm_dir.join("i915/gt/gen9_renderstate.c"));
+    sources.push(vdrm_dir.join("i915/display/intel_qp_tables.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_agp_backend.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_backup.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_bo.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_bo_util.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_bo_vm.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_device.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_execbuf_util.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_module.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_pool.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_range_manager.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_resource.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_sys_manager.c"));
+    sources.push(vdrm_dir.join("ttm/ttm_tt.c"));
 
     for path in sources {
         let obj_name = path.file_stem().unwrap().to_str().unwrap().to_string();
@@ -347,11 +410,15 @@ fn main() {
             .arg("-DI915")
             .arg("-D__OpenBSD__")
             .arg("-D_KERNEL")
+            .arg("-DDRMDEBUG")
+            .arg("-DI915_SHIM_DISPLAY_ONLY")
             .arg("-mno-red-zone")
             .arg("-mno-mmx")
             .arg("-mno-sse")
             .arg("-mno-sse2")
             .arg("-std=gnu11")
+            .arg("-include")
+            .arg("stddef.h")
             .arg("-fdata-sections")
             .arg("-ffunction-sections")
             .arg("-O2")
@@ -377,4 +444,44 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=i915shim");
+
+    for sym in [
+        "i915_gem_object_create_region_at",
+        "intel_plane_disable_noatomic",
+        "intel_initial_commit",
+        "vmap",
+        "intel_pps_check_power_unlocked",
+        "vga_get_uninterruptible",
+        "vga_put",
+        "__px_dma",
+        "vlv_suspend_init",
+        "intel_region_ttm_device_init",
+        "intel_root_gt_init_early",
+        "intel_gt_probe_all",
+        "intel_display_driver_probe_noirq",
+        "intel_irq_install",
+        "intel_display_driver_probe_nogem",
+        "i915_gem_init",
+        "i915_ppgtt_create",
+        "intel_engines_init",
+        "intel_execlists_submission_setup",
+        "i915_gem_object_create_internal",
+        "i915_vma_pin_ww",
+        "i915_vma_get_pages",
+        "____i915_gem_object_get_pages",
+        "intel_gt_resume",
+        "intel_display_driver_probe",
+        "i915_request_add",
+        "intel_gt_wait_for_idle",
+        "intel_renderstate_fini",
+        "dma_fence_wait_timeout",
+        "intel_guc_fw_upload",
+        "intel_guc_ct_send",
+        "kmap",
+        "kunmap_va",
+        "kmap_atomic_prot",
+        "kunmap_atomic",
+    ] {
+        println!("cargo:rustc-link-arg=--wrap={}", sym);
+    }
 }

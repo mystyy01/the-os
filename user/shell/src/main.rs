@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use libsys::{mailboxes, open, print, read};
+use libsys::{close, create, mailboxes, open, print, read, ulog_drain, write};
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
@@ -19,6 +19,22 @@ unsafe extern "C" fn _start() -> ! {
             let line = &line_buf[..line_len];
             if line == b"hello" {
                 print("hi!\n");
+            } else if line == b"flush" {
+                let fd = create(b"/userspace.log");
+                if fd >= 0 {
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        let m = ulog_drain(&mut buf);
+                        if m == 0 {
+                            break;
+                        }
+                        write(fd, &buf[..m]);
+                    }
+                    close(fd);
+                    print("\nflushed\n");
+                } else {
+                    print("\nflush: open failed\n");
+                }
             } else if line == b"clear" {
                 print("\x1b[2J");
             } else if line.starts_with(b"cat ") {

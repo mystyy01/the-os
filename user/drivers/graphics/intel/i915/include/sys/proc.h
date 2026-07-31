@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 #include <sys/filedesc.h>
 #include <sys/file.h>
 
@@ -43,10 +44,12 @@ unsleep(struct proc *p)
 	(void)p;
 }
 
+extern void os_wakeup(uint64_t ident);
+
 static inline int
 wakeup_proc(struct proc *p)
 {
-	(void)p;
+	os_wakeup((uint64_t)(uintptr_t)p);
 	return 0;
 }
 
@@ -54,6 +57,7 @@ wakeup_proc(struct proc *p)
 #define SCHED_UNLOCK() ((void)0)
 #define KERNEL_ASSERT_LOCKED() ((void)0)
 
+extern char osrelease[];
 extern char *hw_vendor;
 extern char *hw_prod;
 extern char *hw_ver;

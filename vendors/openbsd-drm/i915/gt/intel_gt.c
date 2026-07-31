@@ -736,9 +736,13 @@ int intel_gt_init(struct intel_gt *gt)
 	if (err)
 		gt_err(gt, "Failed to retrieve hwconfig table: %pe\n", ERR_PTR(err));
 
+#ifdef I915_SHIM_DISPLAY_ONLY
+	gt_notice(gt, "Skipping engine default capture for display bring-up\n");
+#else
 	err = __engines_record_defaults(gt);
 	if (err)
 		goto err_gt;
+#endif
 
 	err = __engines_verify_workarounds(gt);
 	if (err)
