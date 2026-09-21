@@ -7,3 +7,10 @@ disk.img
 usb.img
 fsroot/bin/
 vendors/lwext4/
+isodir/boot/rootfs.img
+*.o
+*.log
+serial.log
+.DS_Store
+*.swp
+*~
