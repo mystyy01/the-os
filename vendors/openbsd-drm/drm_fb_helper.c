@@ -253,6 +253,14 @@ __drm_fb_helper_restore_fbdev_mode_unlocked(struct drm_fb_helper *fb_helper,
 	if (do_delayed)
 		drm_fb_helper_hotplug_event(fb_helper);
 
+#ifdef I915_SHIM_DISPLAY_ONLY
+	if (!ret) {
+		extern void i915_shim_fbdev_commit_complete(struct drm_device *);
+
+		i915_shim_fbdev_commit_complete(fb_helper->dev);
+	}
+#endif
+
 	if (fb_helper->funcs->fb_restore)
 		fb_helper->funcs->fb_restore(fb_helper);
 
@@ -1880,7 +1888,12 @@ __drm_fb_helper_initial_config_and_unlock(struct drm_fb_helper *fb_helper)
 	width = dev->mode_config.max_width;
 	height = dev->mode_config.max_height;
 
+	extern void os_console_print(const char *);
+
+	os_console_print("i915: fb modeset probe enter\n");
 	drm_client_modeset_probe(&fb_helper->client, width, height);
+	os_console_print("i915: fb modeset probe done\n");
+	os_console_print("i915: fb single probe enter\n");
 	ret = drm_fb_helper_single_fb_probe(fb_helper);
 	if (ret < 0) {
 		if (ret == -EAGAIN) {
@@ -1891,7 +1904,9 @@ __drm_fb_helper_initial_config_and_unlock(struct drm_fb_helper *fb_helper)
 
 		return ret;
 	}
+	os_console_print("i915: fb single probe done\n");
 	drm_setup_crtcs_fb(fb_helper);
+	os_console_print("i915: fb setup crtcs done\n");
 
 	fb_helper->deferred_setup = false;
 
@@ -1903,7 +1918,9 @@ __drm_fb_helper_initial_config_and_unlock(struct drm_fb_helper *fb_helper)
 	 * register the fbdev emulation instance in kernel_fb_helper_list. */
 	mutex_unlock(&fb_helper->lock);
 
+	os_console_print("i915: register framebuffer enter\n");
 	ret = register_framebuffer(info);
+	os_console_print("i915: register framebuffer done\n");
 	if (ret < 0)
 		return ret;
 

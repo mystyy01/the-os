@@ -131,6 +131,11 @@ fn add_region(base: u64, size: u64) -> () {
             remaining -= PAGE_SIZE << best_order;
             continue;
         }
+        if crate::modules::overlaps(base, PAGE_SIZE << best_order) {
+            base += PAGE_SIZE << best_order;
+            remaining -= PAGE_SIZE << best_order;
+            continue;
+        }
         free_page(base, best_order);
         unsafe {
             BUDDY.total_memory += PAGE_SIZE << best_order;

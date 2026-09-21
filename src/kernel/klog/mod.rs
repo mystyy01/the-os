@@ -3,14 +3,12 @@
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 const SIZE: usize = 256 * 1024;
-const DUMP_TAIL: usize = 48 * 1024;
 
 static mut BUF: [u8; SIZE] = [0u8; SIZE];
 static mut CRASH_SNAPSHOT: [u8; SIZE] = [0u8; SIZE];
 static mut POS: usize = 0;
 static mut WRAPPED: bool = false;
 static LOCK: AtomicBool = AtomicBool::new(false);
-static DUMPED: AtomicBool = AtomicBool::new(false);
 static CRASH_LEN: AtomicUsize = AtomicUsize::new(0);
 
 pub fn append(bytes: &[u8]) {
@@ -26,42 +24,6 @@ pub fn append(bytes: &[u8]) {
         }
     }
     LOCK.store(false, Ordering::Release);
-}
-
-fn emit_byte(b: u8) {
-    crate::serial::write_byte(b);
-}
-
-fn emit(s: &str) {
-    for b in s.bytes() {
-        emit_byte(b);
-    }
-}
-
-pub fn dump() {
-    unsafe {
-        let total = if WRAPPED { SIZE } else { POS };
-        let take = if total < DUMP_TAIL { total } else { DUMP_TAIL };
-        let mut i = (POS + SIZE - take) % SIZE;
-        emit("\n===== KLOG TAIL DUMP =====\n");
-        let mut n = 0;
-        while n < take {
-            emit_byte(BUF[i]);
-            i += 1;
-            if i >= SIZE {
-                i = 0;
-            }
-            n += 1;
-        }
-        emit("\n===== END KLOG =====\n");
-    }
-}
-
-pub fn dump_once() {
-    if DUMPED.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    dump();
 }
 
 fn append_unlocked(bytes: &[u8]) {

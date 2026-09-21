@@ -826,6 +826,7 @@ int drm_client_modeset_probe(struct drm_client_dev *client, unsigned int width, 
 	struct drm_crtc **crtcs;
 	int i, ret = 0;
 	bool *enabled;
+	extern void os_console_print(const char *);
 
 	drm_dbg_kms(dev, "\n");
 
@@ -834,6 +835,7 @@ int drm_client_modeset_probe(struct drm_client_dev *client, unsigned int width, 
 	if (!height)
 		height = dev->mode_config.max_height;
 
+	os_console_print("i915: modeset connectors enter\n");
 	drm_connector_list_iter_begin(dev, &conn_iter);
 	drm_client_for_each_connector_iter(connector, &conn_iter) {
 		struct drm_connector **tmp;
@@ -859,10 +861,12 @@ int drm_client_modeset_probe(struct drm_client_dev *client, unsigned int width, 
 		connectors[connector_count++] = connector;
 	}
 	drm_connector_list_iter_end(&conn_iter);
+	os_console_print("i915: modeset connectors done\n");
 
 	if (!connector_count)
 		return 0;
 
+	os_console_print("i915: modeset alloc enter\n");
 	crtcs = kcalloc(connector_count, sizeof(*crtcs), GFP_KERNEL);
 	modes = kcalloc(connector_count, sizeof(*modes), GFP_KERNEL);
 	offsets = kcalloc(connector_count, sizeof(*offsets), GFP_KERNEL);
@@ -871,18 +875,28 @@ int drm_client_modeset_probe(struct drm_client_dev *client, unsigned int width, 
 		ret = -ENOMEM;
 		goto out;
 	}
+	os_console_print("i915: modeset alloc done\n");
 
+	os_console_print("i915: modeset client lock enter\n");
 	mutex_lock(&client->modeset_mutex);
+	os_console_print("i915: modeset client lock done\n");
 
+	os_console_print("i915: mode config lock enter\n");
 	mutex_lock(&dev->mode_config.mutex);
+	os_console_print("i915: mode config lock done\n");
+	os_console_print("i915: fill modes enter\n");
 	for (i = 0; i < connector_count; i++)
 		total_modes_count += connectors[i]->funcs->fill_modes(connectors[i], width, height);
+	os_console_print("i915: fill modes done\n");
 	if (!total_modes_count)
 		drm_dbg_kms(dev, "No connectors reported connected with modes\n");
 	drm_client_connectors_enabled(connectors, connector_count, enabled);
+	os_console_print("i915: connectors enabled done\n");
 
+	os_console_print("i915: firmware config enter\n");
 	if (!drm_client_firmware_config(client, connectors, connector_count, crtcs,
 					modes, offsets, enabled, width, height)) {
+		os_console_print("i915: fallback config enter\n");
 		modes_destroy(dev, modes, connector_count);
 		memset(crtcs, 0, connector_count * sizeof(*crtcs));
 		memset(offsets, 0, connector_count * sizeof(*offsets));
@@ -898,11 +912,15 @@ int drm_client_modeset_probe(struct drm_client_dev *client, unsigned int width, 
 
 		drm_client_pick_crtcs(client, connectors, connector_count,
 				      crtcs, modes, 0, width, height);
+		os_console_print("i915: fallback config done\n");
 	}
+	os_console_print("i915: firmware config done\n");
 
 	mutex_unlock(&dev->mode_config.mutex);
+	os_console_print("i915: mode config unlock done\n");
 
 	drm_client_modeset_release(client);
+	os_console_print("i915: modeset release done\n");
 
 	for (i = 0; i < connector_count; i++) {
 		const struct drm_display_mode *mode = modes[i];
@@ -938,17 +956,26 @@ int drm_client_modeset_probe(struct drm_client_dev *client, unsigned int width, 
 	}
 
 	mutex_unlock(&client->modeset_mutex);
+	os_console_print("i915: modeset client unlock done\n");
 out:
+	os_console_print("i915: modeset array cleanup enter\n");
 	kfree(crtcs);
 	if (modes)
 		modes_destroy(dev, modes, connector_count);
 	kfree(modes);
 	kfree(offsets);
 	kfree(enabled);
+	os_console_print("i915: modeset array cleanup done\n");
 free_connectors:
-	for (i = 0; i < connector_count; i++)
+	os_console_print("i915: connector puts enter\n");
+	for (i = 0; i < connector_count; i++) {
+		os_console_print("i915: connector put enter\n");
 		drm_connector_put(connectors[i]);
+		os_console_print("i915: connector put done\n");
+	}
+	os_console_print("i915: connector puts done\n");
 	kfree(connectors);
+	os_console_print("i915: modeset probe return\n");
 
 	return ret;
 }

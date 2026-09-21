@@ -28,8 +28,9 @@ fn on_kernel_crash(_req: &[u8], _reply: &mut [u8]) -> usize {
     0
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     register(OP_KERNEL_CRASH, on_kernel_crash);
     serve(SVC_CRASHLOG);
     loop {}

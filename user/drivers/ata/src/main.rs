@@ -133,8 +133,9 @@ fn on_read(req: &[u8], reply: &mut [u8]) -> usize {
     len
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     if identify() < 0 {
         panic!();
     }

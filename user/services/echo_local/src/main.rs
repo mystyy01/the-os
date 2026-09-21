@@ -17,8 +17,9 @@ fn on_echo_ts(_req: &[u8], reply: &mut [u8]) -> usize {
     16
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     register(OP_ECHO, on_echo);
     register(OP_ECHO_TS, on_echo_ts);
     serve(SVC_ECHO_LOCAL);

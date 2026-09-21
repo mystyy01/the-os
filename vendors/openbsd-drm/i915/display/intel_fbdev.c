@@ -601,17 +601,25 @@ void intel_fbdev_setup(struct intel_display *display)
 	if (!HAS_DISPLAY(display))
 		return;
 
+	extern void os_console_print(const char *);
+
+	os_console_print("i915: fbdev alloc enter\n");
 	ifbdev = drmm_kzalloc(display->drm, sizeof(*ifbdev), GFP_KERNEL);
 	if (!ifbdev)
 		return;
+	os_console_print("i915: fbdev alloc done\n");
 
 	display->fbdev.fbdev = ifbdev;
+	os_console_print("i915: fbdev bios enter\n");
 	if (intel_fbdev_init_bios(display, ifbdev))
 		preferred_bpp = intel_fbdev_color_mode(ifbdev->fb->base.format);
+	os_console_print("i915: fbdev bios done\n");
 	if (!preferred_bpp)
 		preferred_bpp = 32;
 
+	os_console_print("i915: fbdev client setup enter\n");
 	drm_client_setup_with_color_mode(display->drm, preferred_bpp);
+	os_console_print("i915: fbdev client setup done\n");
 }
 
 struct intel_framebuffer *intel_fbdev_framebuffer(struct intel_fbdev *fbdev)

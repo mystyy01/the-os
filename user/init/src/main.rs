@@ -2,8 +2,8 @@
 #![no_main]
 
 use libsys::{
-    OP_BIND, OP_PCI_FIND, SVC_INIT, SVC_KBD, SVC_PCI, mbox_call, mbox_connect, open, print,
-    print_hex, read, register, serve, spawn, stop_serving, syscall, vfs_bind, vfs_resolve,
+    OP_BIND, OP_PCI_FIND, SVC_INIT, SVC_KBD, SVC_PCI, mbox_call, mbox_connect, module_info, open,
+    print, print_hex, read, register, serve, spawn, stop_serving, syscall, vfs_bind, vfs_resolve,
 };
 
 fn fs_wait(req: &[u8], reply: &mut [u8]) -> usize {
@@ -38,21 +38,34 @@ fn pci_probe_debug() {
     print("\n");
 }
 
+const RUN_BENCH: bool = false;
+const RUN_PRIMITIVE_STRESS: bool = false;
 const I915_BUF_SIZE: usize = 4 * 1024 * 1024;
 static mut I915_BUF: [u8; I915_BUF_SIZE] = [0; I915_BUF_SIZE];
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     let vfs = include_bytes!("../../dist/vfs.elf");
     spawn(vfs, 1);
-    let ata = include_bytes!("../../dist/ata.elf");
-    spawn(ata, 0);
+    let (mod_phys, mod_len) = module_info(0);
+    let boot_module = mod_phys != 0 && mod_len != 0;
+    if boot_module {
+        print("init: boot module rootfs, skipping ata/usb storage\n");
+        let ramdisk = include_bytes!("../../dist/ramdisk.elf");
+        spawn(ramdisk, 0);
+    } else {
+        let ata = include_bytes!("../../dist/ata.elf");
+        spawn(ata, 0);
+    }
     let fs = include_bytes!("../../dist/fs.elf");
     spawn(fs, 0);
     let pci = include_bytes!("../../dist/pci.elf");
     spawn(pci, 0);
-    let usb = include_bytes!("../../dist/usb.elf");
-    spawn(usb, 0);
+    if !boot_module {
+        let usb = include_bytes!("../../dist/usb.elf");
+        spawn(usb, 0);
+    }
 
     pci_probe_debug();
 
@@ -113,13 +126,25 @@ unsafe extern "C" fn _start() -> ! {
     let n = read(echo_local_fd, &mut scratch);
     spawn(&scratch[..n as usize], 3);
 
-    let bench_fd = open(b"/bin/bench");
-    if bench_fd < 0 {
-        print("BENCH FD FAILED\n");
-        loop {}
+    if RUN_BENCH {
+        let bench_fd = open(b"/bin/bench");
+        if bench_fd < 0 {
+            print("BENCH FD FAILED\n");
+            loop {}
+        }
+        let n = read(bench_fd, &mut scratch);
+        spawn(&scratch[..n as usize], 3);
     }
-    let n = read(bench_fd, &mut scratch);
-    spawn(&scratch[..n as usize], 3);
+
+    if RUN_PRIMITIVE_STRESS {
+        let ps_fd = open(b"/bin/primitive-stress");
+        if ps_fd >= 0 {
+            let n = read(ps_fd, &mut scratch);
+            spawn(&scratch[..n as usize], 3);
+        } else {
+            print("PRIMITIVE-STRESS FD FAILED\n");
+        }
+    }
 
     let i915_fd = open(b"/bin/i915");
     if i915_fd >= 0 {
@@ -130,7 +155,7 @@ unsafe extern "C" fn _start() -> ! {
             )
         };
         let n = read(i915_fd, big);
-        spawn(&big[..n as usize], 0);
+        spawn(&big[..n as usize], 1);
     }
 
     loop {

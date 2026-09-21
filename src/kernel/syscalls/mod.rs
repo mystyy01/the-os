@@ -150,11 +150,13 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
 
             crate::klog::append(bytes);
 
-            serial::lock();
-            for byte in bytes {
-                serial::write_byte(*byte);
+            if arg3 != 0 {
+                serial::lock();
+                for byte in bytes {
+                    serial::write_byte(*byte);
+                }
+                serial::unlock();
             }
-            serial::unlock();
 
             return 0;
         }
@@ -365,7 +367,8 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
             let entry = arg1;
             let stack_order = arg2 as usize;
             let priority = arg3 as u8;
-            return scheduler::spawn_thread_in(entry, stack_order, priority) as u64;
+            let arg = arg4;
+            return scheduler::spawn_thread_in(entry, arg, stack_order, priority) as u64;
         },
         26 => {
             return crate::sleepq::sleep(arg1, arg2);
@@ -384,6 +387,12 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
         30 => {
             return crate::msi::take();
         }
+        32 => {
+            return crate::sleepq::prepare(arg1, arg2);
+        }
+        33 => {
+            return crate::sleepq::commit(arg1);
+        }
         31 => {
             return crate::klog::read_crash_snapshot(
                 arg1 as *mut u8,
@@ -391,6 +400,15 @@ pub extern "C" fn syscall_handler(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4
                 arg3 as usize,
             ) as u64;
         }
+        34 => match crate::modules::get(arg1 as usize) {
+            Some((phys, len)) => unsafe {
+                if arg2 != 0 {
+                    *(arg2 as *mut u64) = len;
+                }
+                return phys;
+            },
+            None => return 0,
+        },
         _ => u64::MAX,
     }
 }

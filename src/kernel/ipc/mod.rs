@@ -63,19 +63,21 @@ impl Default for IPCConnection {
 }
 
 pub const ARENA_VADDR: u64 = 0x5000_0000;
-pub const ARENA_PAGES: u64 = 128;
+pub const ARENA_PAGES: u64 = 256;
 pub static mut ARENA_PHYS: u64 = 0;
 
 pub const MBOX_OFF: usize = 4096;
 pub const BUFPOOL_OFF: usize = 0x10000;
 pub const BUF_SIZE: usize = 4096;
-pub const MAX_MAILBOXES: usize = 64;
+pub const MAX_USER_MAILBOXES: usize = 128;
+pub const KERNEL_CRASH_MBOX: usize = MAX_USER_MAILBOXES;
+pub const IRQ_MBOX_BASE: usize = KERNEL_CRASH_MBOX + 1;
+pub const MAX_MAILBOXES: usize = IRQ_MBOX_BASE + MAX_IRQ;
 pub const OP_IRQ: u8 = 6;
 pub const OP_KERNEL_CRASH: u8 = 7;
 pub const MBOX_REQ: u32 = 1;
-const KERNEL_CRASH_MBOX: usize = 47;
 
-pub const IRQRING_OFF: usize = 0x50000;
+pub const IRQRING_OFF: usize = 0xA2000;
 pub const IRQRING_CAP: usize = 256;
 pub const MAX_IRQ: usize = 16;
 
@@ -86,7 +88,7 @@ pub struct IrqRing {
     pub data: [u8; IRQRING_CAP],
 }
 
-pub const INBOX_OFF: usize = 0x55000;
+pub const INBOX_OFF: usize = 0xA4000;
 pub const MAX_SERVICES: usize = 16;
 pub const INBOX_CAP: usize = 48;
 
@@ -261,7 +263,7 @@ pub struct Mailbox {
 
 pub fn init() {
     unsafe {
-        let phys = crate::pmm::alloc_pages(7) as u64; // order 4 = 16 contiguous pages
+        let phys = crate::pmm::alloc_pages(8) as u64;
         core::ptr::write_bytes(
             crate::vmm::phys_to_virt(phys) as *mut u8,
             0,

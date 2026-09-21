@@ -24,14 +24,14 @@ impl Default for CPULocal {
 }
 
 unsafe impl Sync for CPULocal {}
-static mut CPU_LOCALS: [CPULocal; 8] = [CPULocal {
+static mut CPU_LOCALS: [CPULocal; crate::scheduler::MAX_CPUS] = [CPULocal {
     kernel_stack_top: 0,
     user_rsp: 0,
     kernel_cr3: 0,
     current_task: None,
     cpu_id: 0,
-}; 8];
-static mut APIC_IDS: [u8; 8] = [0; 8];
+}; crate::scheduler::MAX_CPUS];
+static mut APIC_IDS: [u8; crate::scheduler::MAX_CPUS] = [0; crate::scheduler::MAX_CPUS];
 
 pub unsafe fn register_cpu(seq: u32, apic_id: u8) {
     unsafe {

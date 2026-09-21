@@ -592,7 +592,11 @@ void intel_display_driver_register(struct intel_display *display)
 		return;
 
 	/* Must be done after probing outputs */
+	extern void os_console_print(const char *);
+
+	os_console_print("i915: display opregion enter\n");
 	intel_opregion_register(display);
+	os_console_print("i915: display opregion done\n");
 	intel_acpi_video_register(display);
 
 	intel_audio_init(display);
@@ -608,10 +612,14 @@ void intel_display_driver_register(struct intel_display *display)
 	 * fbdev configuration, for which we use the
 	 * fbdev->async_cookie.
 	 */
+	os_console_print("i915: display poll enter\n");
 	drm_kms_helper_poll_init(display->drm);
 	intel_hpd_poll_disable(display);
+	os_console_print("i915: display poll done\n");
 
+	os_console_print("i915: fbdev setup enter\n");
 	intel_fbdev_setup(display);
+	os_console_print("i915: fbdev setup done\n");
 
 	intel_display_device_info_print(DISPLAY_INFO(display),
 					DISPLAY_RUNTIME_INFO(display), &p);

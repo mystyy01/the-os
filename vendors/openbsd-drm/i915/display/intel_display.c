@@ -7341,10 +7341,14 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	intel_wakeref_t wakeref = NULL;
 	int i;
 
+	drm_info(display->drm, "I915_DIAG commit_tail_enter\n");
+
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i)
 		intel_atomic_dsb_prepare(state, crtc);
 
+	drm_info(display->drm, "I915_DIAG fence_wait_enter\n");
 	intel_atomic_commit_fence_wait(state);
+	drm_info(display->drm, "I915_DIAG fence_wait_done\n");
 
 	intel_td_flush(display);
 
@@ -7356,9 +7360,11 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i)
 		intel_atomic_dsb_finish(state, crtc);
 
+	drm_info(display->drm, "I915_DIAG wait_deps_enter\n");
 	drm_atomic_helper_wait_for_dependencies(&state->base);
 	drm_dp_mst_atomic_wait_for_dependencies(&state->base);
 	intel_atomic_global_state_wait_for_dependencies(state);
+	drm_info(display->drm, "I915_DIAG wait_deps_done\n");
 
 	/*
 	 * During full modesets we write a lot of registers, wait
@@ -7387,7 +7393,9 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	 * the CSC latched register values with the readout (see
 	 * skl_read_csc() and skl_color_commit_noarm()).
 	 */
+	drm_info(display->drm, "I915_DIAG dcoff_get_enter\n");
 	wakeref = intel_display_power_get(display, POWER_DOMAIN_DC_OFF);
+	drm_info(display->drm, "I915_DIAG dcoff_get_done\n");
 
 	for_each_oldnew_intel_crtc_in_state(state, crtc, old_crtc_state,
 					    new_crtc_state, i) {
@@ -7396,7 +7404,9 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 			intel_modeset_get_crtc_power_domains(new_crtc_state, &put_domains[crtc->pipe]);
 	}
 
+	drm_info(display->drm, "I915_DIAG modeset_disables_enter\n");
 	intel_commit_modeset_disables(state);
+	drm_info(display->drm, "I915_DIAG modeset_disables_done\n");
 
 	intel_dp_tunnel_atomic_alloc_bw(state);
 
@@ -7410,7 +7420,9 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	 * index, cdclk/ddiclk frequencies are supposed to be configured before
 	 * the cdclk config is set.
 	 */
+	drm_info(display->drm, "I915_DIAG pmdemand_pre_enter\n");
 	intel_pmdemand_pre_plane_update(state);
+	drm_info(display->drm, "I915_DIAG pmdemand_pre_done\n");
 
 	if (state->modeset) {
 		drm_atomic_helper_update_legacy_modeset_state(display->drm, &state->base);
@@ -7420,7 +7432,9 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 		intel_modeset_verify_disabled(state);
 	}
 
+	drm_info(display->drm, "I915_DIAG sagv_pre_enter\n");
 	intel_sagv_pre_plane_update(state);
+	drm_info(display->drm, "I915_DIAG sagv_pre_done\n");
 
 	/* Complete the events for pipes that have now been disabled */
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i) {
@@ -7437,9 +7451,13 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 		}
 	}
 
+	drm_info(display->drm, "I915_DIAG enc_prepare_enter\n");
 	intel_encoders_update_prepare(state);
+	drm_info(display->drm, "I915_DIAG enc_prepare_done\n");
 
+	drm_info(display->drm, "I915_DIAG dbuf_pre_enter\n");
 	intel_dbuf_pre_plane_update(state);
+	drm_info(display->drm, "I915_DIAG dbuf_pre_done\n");
 
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i) {
 		if (new_crtc_state->do_async_flip)
@@ -7447,12 +7465,16 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	}
 
 	/* Now enable the clocks, plane, pipe, and connectors that we set up. */
+	drm_info(display->drm, "I915_DIAG modeset_enables_enter\n");
 	display->funcs.display->commit_modeset_enables(state);
+	drm_info(display->drm, "I915_DIAG modeset_enables_done\n");
 
 	/* FIXME probably need to sequence this properly */
 	intel_program_dpkgc_latency(state);
 
+	drm_info(display->drm, "I915_DIAG vblank_workers_enter\n");
 	intel_wait_for_vblank_workers(state);
+	drm_info(display->drm, "I915_DIAG vblank_workers_done\n");
 
 	/* FIXME: We should call drm_atomic_helper_commit_hw_done() here
 	 * already, but still need the state for the delayed optimization. To
@@ -7463,7 +7485,9 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	 * - switch over to the vblank wait helper in the core after that since
 	 *   we don't need out special handling any more.
 	 */
+	drm_info(display->drm, "I915_DIAG flip_done_wait_enter\n");
 	drm_atomic_helper_wait_for_flip_done(display->drm, &state->base);
+	drm_info(display->drm, "I915_DIAG flip_done_wait_done\n");
 
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i) {
 		if (new_crtc_state->do_async_flip)
@@ -7664,9 +7688,12 @@ int intel_atomic_commit(struct drm_device *dev, struct drm_atomic_state *_state,
 		return ret;
 	}
 
+	drm_info(dev, "I915_DIAG setup_commit_enter\n");
 	ret = intel_atomic_setup_commit(state, nonblock);
+	drm_info(dev, "I915_DIAG setup_commit_done ret=%d\n", ret);
 	if (!ret)
 		ret = intel_atomic_swap_state(state);
+	drm_info(dev, "I915_DIAG swap_state_done ret=%d\n", ret);
 
 	if (ret) {
 		drm_atomic_helper_unprepare_planes(dev, &state->base);
@@ -7684,7 +7711,10 @@ int intel_atomic_commit(struct drm_device *dev, struct drm_atomic_state *_state,
 	} else {
 		if (state->modeset)
 			flush_workqueue(display->wq.modeset);
+		drm_info(dev, "I915_DIAG calling_commit_tail nonblock=%d modeset=%d\n",
+			 nonblock, state->modeset);
 		intel_atomic_commit_tail(state);
+		drm_info(dev, "I915_DIAG commit_tail_returned\n");
 	}
 
 	return 0;

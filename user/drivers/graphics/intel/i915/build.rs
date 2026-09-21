@@ -471,7 +471,6 @@ fn main() {
         "____i915_gem_object_get_pages",
         "intel_gt_resume",
         "intel_display_driver_probe",
-        "i915_request_add",
         "intel_gt_wait_for_idle",
         "intel_renderstate_fini",
         "dma_fence_wait_timeout",

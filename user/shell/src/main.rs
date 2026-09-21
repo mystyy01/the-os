@@ -3,8 +3,9 @@
 
 use libsys::{close, create, mailboxes, open, print, read, ulog_drain, write};
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     let mut line_buf = [0u8; 256];
     let mut line_len: usize = 0;
     let kb_fd = open("/dev/keyboard".as_bytes());

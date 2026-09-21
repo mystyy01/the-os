@@ -433,6 +433,19 @@ vprintf(const char *fmt, va_list ap)
 }
 
 int
+printf_direct(const char *fmt, ...)
+{
+	char buf[256];
+	va_list ap;
+	int r;
+	va_start(ap, fmt);
+	r = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	os_print(buf);
+	return r;
+}
+
+int
 printf(const char *fmt, ...)
 {
 	va_list ap;
@@ -460,6 +473,9 @@ DELAY(int usec)
 }
 
 extern uint64_t os_sleep(uint64_t ident, uint64_t timeout_ns);
+extern uint64_t os_sleep_prepare(uint64_t ident, uint64_t timeout_ns);
+extern uint64_t os_sleep_commit(uint64_t handle);
+#define I915_MAX_SLEEP_NS 500000000ULL
 extern void os_wakeup(uint64_t ident);
 
 int
@@ -467,7 +483,9 @@ tsleep(void *ident, int priority, const char *wmesg, int timo)
 {
 	(void)priority;
 	(void)wmesg;
-	uint64_t ns = (timo > 0) ? ((uint64_t)timo * 10000000ULL) : 0;
+	uint64_t ns = (timo > 0) ? ((uint64_t)timo * 10000000ULL) : I915_MAX_SLEEP_NS;
+	if (ns > I915_MAX_SLEEP_NS)
+		ns = I915_MAX_SLEEP_NS;
 	uint64_t r = os_sleep((uint64_t)(uintptr_t)ident, ns);
 	i915_refresh_jiffies();
 	return (r == 1) ? 1 : 0;
@@ -478,7 +496,9 @@ tsleep_nsec(void *ident, int priority, const char *wmesg, uint64_t nsecs)
 {
 	(void)priority;
 	(void)wmesg;
-	uint64_t ns = (nsecs == UINT64_MAX) ? 0 : nsecs;
+	uint64_t ns = (nsecs == UINT64_MAX) ? I915_MAX_SLEEP_NS : nsecs;
+	if (ns > I915_MAX_SLEEP_NS)
+		ns = I915_MAX_SLEEP_NS;
 	uint64_t r = os_sleep((uint64_t)(uintptr_t)ident, ns);
 	i915_refresh_jiffies();
 	return (r == 1) ? 1 : 0;
@@ -616,25 +636,39 @@ wakeup_one(const volatile void *ident)
 int
 msleep_nsec(const volatile void *ident, void *lock, int priority, const char *wmesg, uint64_t nsecs)
 {
-	(void)lock;
 	(void)priority;
 	(void)wmesg;
-	uint64_t ns = (nsecs == UINT64_MAX) ? 0 : nsecs;
-	uint64_t r = os_sleep((uint64_t)(uintptr_t)ident, ns);
+	uint64_t ns = (nsecs == UINT64_MAX) ? I915_MAX_SLEEP_NS : nsecs;
+	if (ns > I915_MAX_SLEEP_NS)
+		ns = I915_MAX_SLEEP_NS;
+
+	uint64_t h = os_sleep_prepare((uint64_t)(uintptr_t)ident, ns);
+	if (lock)
+		mtx_leave(lock);
+	uint64_t r = os_sleep_commit(h);
+	if (lock)
+		mtx_enter(lock);
 	i915_refresh_jiffies();
-	return (r == 1) ? 1 : 0;
+	return (r == 1 && nsecs != UINT64_MAX) ? 1 : 0;
 }
 
 int
 msleep(const volatile void *ident, void *lock, int priority, const char *wmesg, int timo)
 {
-	(void)lock;
 	(void)priority;
 	(void)wmesg;
-	uint64_t ns = (timo > 0) ? ((uint64_t)timo * 10000000ULL) : 0;
-	uint64_t r = os_sleep((uint64_t)(uintptr_t)ident, ns);
+	uint64_t ns = (timo > 0) ? ((uint64_t)timo * 10000000ULL) : I915_MAX_SLEEP_NS;
+	if (ns > I915_MAX_SLEEP_NS)
+		ns = I915_MAX_SLEEP_NS;
+
+	uint64_t h = os_sleep_prepare((uint64_t)(uintptr_t)ident, ns);
+	if (lock)
+		mtx_leave(lock);
+	uint64_t r = os_sleep_commit(h);
+	if (lock)
+		mtx_enter(lock);
 	i915_refresh_jiffies();
-	return (r == 1) ? 1 : 0;
+	return (r == 1 && timo > 0) ? 1 : 0;
 }
 
 struct kmem_va_mode kv_page;
@@ -709,7 +743,9 @@ int
 sleep_finish(uint64_t nsecs, int do_sleep)
 {
 	if (do_sleep) {
-		uint64_t ns = (nsecs == UINT64_MAX) ? 0 : nsecs;
+		uint64_t ns = (nsecs == UINT64_MAX) ? I915_MAX_SLEEP_NS : nsecs;
+		if (ns > I915_MAX_SLEEP_NS)
+			ns = I915_MAX_SLEEP_NS;
 		os_sleep((uint64_t)(uintptr_t)curproc, ns);
 	}
 	i915_refresh_jiffies();

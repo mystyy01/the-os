@@ -1,5 +1,7 @@
 #pragma once
 #include <stdint.h>
+#include <stddef.h>
+#include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 
 #define RI_CENTER 0x0001
@@ -98,11 +100,31 @@ rasops_scrollback(struct rasops_info *ri, void *cookie, int lines)
 	(void)lines;
 }
 
+static struct wsdisplay_font rasops_shim_font = { 8, 16 };
+
+static inline void
+rasops_shim_pack_attr(void *cookie, int fg, int bg, int flags, uint32_t *attrp)
+{
+	(void)cookie;
+	(void)fg;
+	(void)bg;
+	(void)flags;
+	*attrp = 0;
+}
+
 static inline int
 rasops_init(struct rasops_info *ri, int cols, int rows)
 {
-	(void)ri;
-	(void)cols;
-	(void)rows;
+	int maxcols = ri->ri_width / rasops_shim_font.fontwidth;
+	int maxrows = ri->ri_height / rasops_shim_font.fontheight;
+
+	ri->ri_font = &rasops_shim_font;
+	ri->ri_ops.pack_attr = rasops_shim_pack_attr;
+	if (ri->ri_active == NULL)
+		ri->ri_active = ri;
+
+	ri->ri_cols = cols < maxcols ? cols : maxcols;
+	ri->ri_rows = rows < maxrows ? rows : maxrows;
+	ri->ri_caps = 0;
 	return 0;
 }

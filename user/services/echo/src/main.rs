@@ -33,8 +33,9 @@ fn floor_server() {
     }
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     floor_server();
     register(OP_ECHO, on_echo);
     register(OP_ECHO_TS, on_echo_ts);

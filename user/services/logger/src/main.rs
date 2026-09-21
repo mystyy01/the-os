@@ -3,8 +3,9 @@
 
 use libsys::{close, create, create_trunc, sys_sleep, ulog_drain, write};
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     let mut buf = [0u8; 4096];
     let mut first = true;
     loop {

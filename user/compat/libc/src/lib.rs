@@ -1,10 +1,15 @@
 #![no_std]
 
 use core::ffi::{c_int, c_void};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 const ARENA_SIZE: usize = 128 * 1024 * 1024;
-static mut ARENA: [u8; ARENA_SIZE] = [0; ARENA_SIZE];
-static mut OFFSET: usize = 0;
+
+#[repr(C, align(64))]
+struct Arena([u8; ARENA_SIZE]);
+
+static mut ARENA: Arena = Arena([0; ARENA_SIZE]);
+static OFFSET: AtomicUsize = AtomicUsize::new(0);
 
 unsafe extern "C" {
     fn os_print(s: *const u8);
@@ -12,13 +17,27 @@ unsafe extern "C" {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malloc(size: usize) -> *mut c_void {
-    let off = (OFFSET + 15) & !15;
-    if off + size > ARENA_SIZE {
-        os_print(c"compat-libc: arena OOM".as_ptr() as *const u8);
-        return core::ptr::null_mut();
+    let off = loop {
+        let current = OFFSET.load(Ordering::Relaxed);
+        let aligned = (current + 15) & !15;
+        let Some(next) = aligned.checked_add(size) else {
+            os_print(c"compat-libc: arena OOM".as_ptr() as *const u8);
+            return core::ptr::null_mut();
+        };
+        if next > ARENA_SIZE {
+            os_print(c"compat-libc: arena OOM".as_ptr() as *const u8);
+            return core::ptr::null_mut();
+        }
+        if OFFSET
+            .compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            break aligned;
+        }
+    };
+    unsafe {
+        (&raw mut ARENA as *mut u8).add(off) as *mut c_void
     }
-    OFFSET = off + size;
-    (&raw mut ARENA as *mut u8).add(off) as *mut c_void
 }
 
 #[unsafe(no_mangle)]

@@ -7,10 +7,17 @@
 
 int inteldrm_match(struct device *, void *, void *);
 void inteldrm_attach(struct device *, struct device *, void *);
+int i915_shim_gpu_bounce_frame(uint32_t, uint32_t, uint32_t, uint32_t,
+    uint32_t, uint32_t);
+void os_wakeup(uint64_t);
+void os_print(const char *);
+void os_console_print(const char *);
+void i915_platform_report(struct drm_i915_private *);
 
 extern unsigned long __drm_debug;
 
 static struct drm_i915_private g_i915;
+static int g_bounce_ready;
 
 int
 i915_shim_probe(uint32_t bus, uint32_t device, uint32_t function,
@@ -19,6 +26,7 @@ i915_shim_probe(uint32_t bus, uint32_t device, uint32_t function,
 {
 	struct pci_attach_args pa;
 
+	os_console_print("i915: shim_probe enter\n");
 	__drm_debug = 0x7UL;
 
 	memset(&pa, 0, sizeof(pa));
@@ -37,12 +45,15 @@ i915_shim_probe(uint32_t bus, uint32_t device, uint32_t function,
 	pa.pa_memex = 0;
 	pa.pa_flags = 0;
 
+	os_console_print("i915: before match\n");
 	if (inteldrm_match(0, 0, &pa) == 0)
 		return 1;
+	os_console_print("i915: after match\n");
 
-	printf("i915: stage shim_before_attach\n");
+	os_console_print("i915: before attach\n");
 	inteldrm_attach(0, (struct device *)&g_i915, &pa);
-	printf("i915: stage shim_after_attach\n");
+	os_console_print("i915: after attach\n");
+	i915_platform_report(&g_i915);
 	return 0;
 }
 
@@ -84,4 +95,27 @@ i915_shim_draw_square(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 			line[x + col] = rgb;
 	}
 	return 0;
+}
+
+int
+i915_shim_bounce_frame(uint32_t old_x, uint32_t old_y,
+    uint32_t new_x, uint32_t new_y, uint32_t size, uint32_t color)
+{
+	return i915_shim_gpu_bounce_frame(old_x, old_y, new_x, new_y,
+	    size, color);
+}
+
+void
+i915_shim_commit_complete(void)
+{
+	if (g_i915.ro.ri_bits != NULL) {
+		__atomic_store_n(&g_bounce_ready, 1, __ATOMIC_RELEASE);
+		os_wakeup(0x1915424f554e4345ULL);
+	}
+}
+
+int
+i915_shim_bounce_ready(void)
+{
+	return __atomic_load_n(&g_bounce_ready, __ATOMIC_ACQUIRE);
 }

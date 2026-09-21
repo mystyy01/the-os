@@ -82,8 +82,9 @@ fn on_irq(_req: &[u8], _reply: &mut [u8]) -> usize {
     0
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     unsafe {
         // register for keyboard shit
         syscall(10, 1, SVC_KBD as u64, 0, 0);

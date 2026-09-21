@@ -38,6 +38,7 @@ mod klog;
 mod ipc;
 mod irq;
 mod lapic;
+mod modules;
 mod msr;
 mod msi;
 mod pic;
@@ -121,8 +122,9 @@ extern "C" fn ap_main() -> ! {
 extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
     serial::init();
     fb::init(multiboot2_info);
-    serial::write_str("init idt\n");
     idt::init();
+    hpet::init(multiboot2_info);
+    serial::write_str("init idt\n");
     serial::write_str("init gdt\n");
     gdt::init(0, &raw const stack_top as u64);
 
@@ -131,10 +133,9 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
 
         syscalls::init();
     }
+    modules::init(multiboot2_info);
     serial::write_str("init pmm\n");
     pmm::init(multiboot2_info);
-
-    hpet::init(multiboot2_info);
 
     ipc::init();
     pic::init();
@@ -154,14 +155,14 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
         let bsp = lapic::id();
         cpu::register_cpu(0, bsp);
 
-        let mut madt_ids = [0u8; 8];
+        let mut madt_ids = [0u8; scheduler::MAX_CPUS];
         let found = acpi::lapic_ids(multiboot2_info, &mut madt_ids);
 
-        let mut candidates = [0u8; 8];
+        let mut candidates = [0u8; scheduler::MAX_CPUS];
         let mut n = 0;
         if found == 0 {
             let mut a = 1u8;
-            while a < 8 {
+            while (a as usize) < scheduler::MAX_CPUS {
                 candidates[n] = a;
                 n += 1;
                 a += 1;
@@ -173,7 +174,7 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
                     if id == bsp {
                         continue;
                     }
-                    if id % 2 == pass && n < 8 {
+                    if id % 2 == pass && n < scheduler::MAX_CPUS {
                         candidates[n] = id;
                         n += 1;
                     }
@@ -183,7 +184,7 @@ extern "C" fn kernel_main(multiboot2_info: *const u8) -> ! {
 
         let mut seq = 1u32;
         let mut i = 0;
-        while i < n && seq < 8 {
+        while i < n && (seq as usize) < scheduler::MAX_CPUS {
             let apic = candidates[i];
             i += 1;
 

@@ -631,13 +631,19 @@ static int i915_driver_register(struct drm_i915_private *dev_priv)
 	unsigned int i;
 	int ret;
 
+	extern void os_console_print(const char *);
+
+	os_console_print("i915: register gem enter\n");
 	i915_gem_driver_register(dev_priv);
+	os_console_print("i915: register gem done\n");
 	i915_pmu_register(dev_priv);
 
 	intel_vgpu_register(dev_priv);
 
 	/* Reveal our presence to userspace */
+	os_console_print("i915: drm_dev_register enter\n");
 	ret = drm_dev_register(&dev_priv->drm, 0);
+	os_console_print("i915: drm_dev_register done\n");
 	if (ret) {
 		i915_probe_error(dev_priv,
 				 "Failed to register driver for userspace access!\n");
@@ -665,7 +671,9 @@ static int i915_driver_register(struct drm_i915_private *dev_priv)
 	i915_hwmon_register(dev_priv);
 	printf("i915: stage register_hwmon_done\n");
 
+	os_console_print("i915: display_register enter\n");
 	intel_display_driver_register(display);
+	os_console_print("i915: display_register done\n");
 	printf("i915: stage register_display_done\n");
 
 	intel_power_domains_enable(display);

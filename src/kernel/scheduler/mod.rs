@@ -57,7 +57,7 @@ struct Scheduler {
 unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
-const MAX_CPUS: usize = 8;
+pub const MAX_CPUS: usize = 8;
 
 static mut SCHEDULERS: [Scheduler; MAX_CPUS] = [Scheduler {
     queues: [[None; MAX_TASKS_PER_PRIORITY]; PRIORITY_LEVELS],
@@ -386,7 +386,7 @@ pub fn spawn_user_task(entry: u64, user_stack_top: u64, cr3: u64, priority: u8, 
     }
 }
 
-pub fn spawn_thread_in(entry: u64, stack_order: usize, priority: u8) -> i32 {
+pub fn spawn_thread_in(entry: u64, arg: u64, stack_order: usize, priority: u8) -> i32 {
     unsafe {
         let cur = get_current_task();
         let cr3 = (*cur).cr3;
@@ -411,7 +411,7 @@ pub fn spawn_thread_in(entry: u64, stack_order: usize, priority: u8) -> i32 {
         *top.sub(2) = 0;
         *top.sub(3) = 0;
         *top.sub(4) = 0;
-        *top.sub(5) = 0;
+        *top.sub(5) = arg;
         *top.sub(6) = user_stack_top;
         *top.sub(7) = entry;
         let ksp = top.sub(7) as u64;

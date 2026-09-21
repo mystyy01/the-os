@@ -14,6 +14,7 @@ LINKER_SCRIPT = linker.ld
 KERNEL_BIN = $(ISO_DIR)/boot/kernel.bin
 RUST_LIB = target/x86_64-unknown-none/debug/libkernel.a
 ISO = kernel.iso
+P2_IMG = $(BUILD_DIR)/ext4part.img
 
 # Userspace workspace. build_user builds one member, strips it, then patches
 # e_ident[EI_OSABI] (offset 7) to 0xAE so the kernel's ELF loader accepts it as a
@@ -68,8 +69,10 @@ user: $(LWEXT4_LIB)
 	$(call build_user,bench)
 	$(call build_user,pci)
 	$(call build_user,usb)
+	$(call build_user,ramdisk)
 	$(call build_user,i915)
 	$(call build_user,threadtest)
+	$(call build_user,primitive-stress)
 	$(call build_user,the-initializer)
 
 rust: user
@@ -79,12 +82,13 @@ $(KERNEL_BIN): $(BOOT_OBJ) $(BUILD_DIR)/ap_trampoline.bin rust
 	mkdir -p $(ISO_DIR)/boot
 	$(LD) -n -T $(LINKER_SCRIPT) -o $@ $(BOOT_OBJ) $(RUST_LIB)
 
-$(ISO): $(KERNEL_BIN)
+$(ISO): $(KERNEL_BIN) $(P2_IMG)
+	cp $(P2_IMG) $(ISO_DIR)/boot/rootfs.img
 	grub-mkrescue -o $@ $(ISO_DIR)
 
 FSROOT = fsroot
 FSROOT_BIN = $(FSROOT)/bin
-EXCLUDE_BIN = vfs ata fs pci usb the-initializer
+EXCLUDE_BIN = vfs ata fs pci usb ramdisk the-initializer
 
 .PHONY: fsroot-bin
 
@@ -101,24 +105,24 @@ disk.img: $(FSROOT)/hello.txt fsroot-bin
 
 USB_IMG = usb.img
 ESP_IMG = $(BUILD_DIR)/esp.img
-P2_IMG = $(BUILD_DIR)/ext4part.img
 GRUB_EFI = $(BUILD_DIR)/BOOTX64.EFI
 GRUB_EMBED = $(BUILD_DIR)/grub-embed.cfg
 
 .PHONY: usb-img
 
-$(GRUB_EFI):
+$(GRUB_EFI): Makefile
 	mkdir -p $(BUILD_DIR)
-	printf 'insmod part_gpt\ninsmod fat\ninsmod ext2\ninsmod all_video\nsearch --no-floppy --file --set=root /boot/kernel.bin\nmultiboot2 /boot/kernel.bin\nboot\n' > $(GRUB_EMBED)
+	printf 'insmod part_gpt\ninsmod fat\ninsmod ext2\ninsmod all_video\nsearch --no-floppy --file --set=root /boot/kernel.bin\nmultiboot2 /boot/kernel.bin\nmodule2 /boot/rootfs.img rootfs\nboot\n' > $(GRUB_EMBED)
 	grub-mkstandalone -O x86_64-efi -o $(GRUB_EFI) "boot/grub/grub.cfg=$(GRUB_EMBED)"
 
-$(ESP_IMG): $(GRUB_EFI) $(KERNEL_BIN)
+$(ESP_IMG): $(GRUB_EFI) $(KERNEL_BIN) $(P2_IMG)
 	rm -f $(ESP_IMG)
-	truncate -s 48M $(ESP_IMG)
+	truncate -s 160M $(ESP_IMG)
 	mkfs.fat -F 32 $(ESP_IMG)
 	mmd -i $(ESP_IMG) ::/EFI ::/EFI/BOOT ::/boot
 	mcopy -i $(ESP_IMG) $(GRUB_EFI) ::/EFI/BOOT/BOOTX64.EFI
 	mcopy -i $(ESP_IMG) $(KERNEL_BIN) ::/boot/kernel.bin
+	mcopy -i $(ESP_IMG) $(P2_IMG) ::/boot/rootfs.img
 
 $(P2_IMG): $(FSROOT)/hello.txt fsroot-bin
 	rm -f $(P2_IMG)
@@ -129,11 +133,11 @@ usb-img: $(USB_IMG)
 
 $(USB_IMG): $(ESP_IMG) $(P2_IMG)
 	rm -f $(USB_IMG)
-	truncate -s 120M $(USB_IMG)
-	printf 'label: gpt\nunit: sectors\nstart=2048, size=98304, type=U\nstart=100352, size=131072, type=L\n' | sfdisk $(USB_IMG)
+	truncate -s 240M $(USB_IMG)
+	printf 'label: gpt\nunit: sectors\nstart=2048, size=327680, type=U\nstart=329728, size=131072, type=L\n' | sfdisk $(USB_IMG)
 	dd if=$(ESP_IMG) of=$(USB_IMG) bs=1M seek=1 conv=notrunc
-	dd if=$(P2_IMG) of=$(USB_IMG) bs=1M seek=49 conv=notrunc
-	@echo "usb.img ready: p1 ESP@1MiB(48M) p2 ext4@49MiB(64M). ext4 part_offset = 51380224 bytes."
+	dd if=$(P2_IMG) of=$(USB_IMG) bs=1M seek=161 conv=notrunc
+	@echo "usb.img ready: p1 ESP@1MiB(160M) p2 ext4@161MiB(64M). ext4 part_offset = 168820736 bytes."
 
 $(FSROOT)/hello.txt:
 	mkdir -p $(FSROOT)

@@ -21,6 +21,8 @@ const TRB_EVALUATE_CONTEXT: u32 = 13;
 const EV_TRANSFER: u32 = 32;
 const EV_CMD_COMPLETION: u32 = 33;
 
+const PORTSC_RW1C: u32 = (1 << 1) | (0x7F << 17);
+
 fn r32(addr: u64) -> u32 {
     unsafe { core::ptr::read_volatile(addr as *const u32) }
 }
@@ -924,28 +926,95 @@ fn bringup(vbase: u64) -> Option<Xhci> {
     Some(xhci)
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
-    let idx = mbox_connect(SVC_PCI);
-    let req = [OP_PCI_FIND, 0x0C, 0x03];
-    let mut out = [0u8; 20];
-    mbox_call(idx, &req, &mut out);
+fn probe_xhci_ports(vbase: u64) -> (u32, u32) {
+    let cap_len = (r32(vbase) & 0xFF) as u64;
+    let hcsparams1 = r32(vbase + 0x04);
+    let op = vbase + cap_len;
+    let max_ports = (hcsparams1 >> 24) & 0xFF;
+    let mut ccs_mask: u32 = 0;
+    let mut n = 1u32;
+    while n <= max_ports && n <= 32 {
+        let portsc = op + 0x400 + ((n - 1) as u64) * 0x10;
+        let mut val = r32(portsc);
+        if val & (1 << 9) == 0 {
+            let preserved = val & !(PORTSC_RW1C | (1 << 4) | (1 << 31));
+            w32(portsc, preserved | (1 << 9));
+            let mut budget: u32 = 100_000;
+            while budget > 0 {
+                budget -= 1;
+                core::hint::spin_loop();
+            }
+            val = r32(portsc);
+        }
+        if val & 1 != 0 {
+            ccs_mask |= 1 << (n - 1);
+        }
+        n += 1;
+    }
+    (max_ports, ccs_mask)
+}
 
-    if out[0] == 0 {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
+    let idx = mbox_connect(SVC_PCI);
+
+    let mut best_vbase: u64 = 0;
+    let mut best_score: u32 = 0;
+    let mut best_bus = 0u8;
+    let mut best_dev = 0u8;
+    let mut best_func = 0u8;
+
+    for candidate in 0u8..8u8 {
+        let req = [OP_PCI_FIND, 0x0C, 0x03, 0x30, candidate];
+        let mut out = [0u8; 20];
+        mbox_call(idx, &req, &mut out);
+        if out[0] == 0 {
+            break;
+        }
+
+        let bar0 = u32::from_le_bytes([out[12], out[13], out[14], out[15]]);
+        let bar1 = u32::from_le_bytes([out[16], out[17], out[18], out[19]]);
+        let phys = ((bar0 as u64) & 0xFFFF_FFF0) | ((bar1 as u64) << 32);
+        let vbase = map_mmio(phys, 16);
+        let (max_ports, ccs_mask) = probe_xhci_ports(vbase);
+        let score = if ccs_mask != 0 { 1000 + max_ports } else { max_ports };
+
+        print("USB: candidate bus=");
+        print_hex(out[1] as u32);
+        print(" dev=");
+        print_hex(out[2] as u32);
+        print(" fn=");
+        print_hex(out[3] as u32);
+        print(" max_ports=");
+        print_hex(max_ports);
+        print(" ccs=");
+        print_hex(ccs_mask);
+        print("\n");
+
+        if best_vbase == 0 || score > best_score {
+            best_score = score;
+            best_vbase = vbase;
+            best_bus = out[1];
+            best_dev = out[2];
+            best_func = out[3];
+        }
+    }
+
+    if best_vbase == 0 {
         print("USB: no xHCI controller found\n");
         loop {}
     }
 
-    let bar0 = u32::from_le_bytes([out[12], out[13], out[14], out[15]]);
-    let bar1 = u32::from_le_bytes([out[16], out[17], out[18], out[19]]);
-    let phys = ((bar0 as u64) & 0xFFFF_FFF0) | ((bar1 as u64) << 32);
-
-    print("USB: xHCI BAR phys=");
-    print_hex((phys >> 32) as u32);
-    print_hex(phys as u32);
+    print("USB: xHCI selected bus=");
+    print_hex(best_bus as u32);
+    print(" dev=");
+    print_hex(best_dev as u32);
+    print(" fn=");
+    print_hex(best_func as u32);
     print("\n");
 
-    let vbase = map_mmio(phys, 16);
+    let vbase = best_vbase;
 
     let mut xhci = match bringup(vbase) {
         Some(x) => x,

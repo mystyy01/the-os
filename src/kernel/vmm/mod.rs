@@ -103,3 +103,37 @@ pub unsafe fn free_table(table: u64, depth: u8) {
         free_pages(0, table);
     }
 }
+
+pub unsafe fn is_mapped(pml4_phys: u64, virt: u64) -> bool {
+    let pml4_idx = (virt >> 39) & 0x1FF;
+    let pdpt_idx = (virt >> 30) & 0x1FF;
+    let pd_idx = (virt >> 21) & 0x1FF;
+    let pt_idx = (virt >> 12) & 0x1FF;
+
+    unsafe {
+        let pml4 = phys_to_virt(pml4_phys & !0xFFF) as *const u64;
+        let mut entry = *pml4.add(pml4_idx as usize);
+        if entry & 1 == 0 {
+            return false;
+        }
+        let pdpt = phys_to_virt(entry & 0x000F_FFFF_FFFF_F000) as *const u64;
+        entry = *pdpt.add(pdpt_idx as usize);
+        if entry & 1 == 0 {
+            return false;
+        }
+        if entry & 0x80 != 0 {
+            return true;
+        }
+        let pd = phys_to_virt(entry & 0x000F_FFFF_FFFF_F000) as *const u64;
+        entry = *pd.add(pd_idx as usize);
+        if entry & 1 == 0 {
+            return false;
+        }
+        if entry & 0x80 != 0 {
+            return true;
+        }
+        let pt = phys_to_virt(entry & 0x000F_FFFF_FFFF_F000) as *const u64;
+        entry = *pt.add(pt_idx as usize);
+        entry & 1 != 0
+    }
+}

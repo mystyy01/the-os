@@ -49,8 +49,9 @@ extern "C" fn thread_entry() -> ! {
     }
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     print("[main] alive, spawning thread\n");
     let tid = spawn_thread(thread_entry, 2, 1);
     print("[main] spawn_thread returned tid=");

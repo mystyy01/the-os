@@ -42,14 +42,20 @@ static int drm_fbdev_client_hotplug(struct drm_client_dev *client)
 	if (dev->fb_helper)
 		return drm_fb_helper_hotplug_event(dev->fb_helper);
 
+	extern void os_console_print(const char *);
+
+	os_console_print("i915: fbdev hotplug init enter\n");
 	ret = drm_fb_helper_init(dev, fb_helper);
 	if (ret)
 		goto err_drm_err;
+	os_console_print("i915: fbdev hotplug init done\n");
 
 	if (!drm_drv_uses_atomic_modeset(dev))
 		drm_helper_disable_unused_functions(dev);
 
+	os_console_print("i915: fbdev initial config enter\n");
 	ret = drm_fb_helper_initial_config(fb_helper);
+	os_console_print("i915: fbdev initial config done\n");
 	if (ret)
 		goto err_drm_fb_helper_fini;
 
@@ -145,18 +151,26 @@ int drm_fbdev_client_setup(struct drm_device *dev, const struct drm_format_info 
 	drm_WARN(dev, !dev->registered, "Device has not been registered.\n");
 	drm_WARN(dev, dev->fb_helper, "fb_helper is already set!\n");
 
+	extern void os_console_print(const char *);
+
+	os_console_print("i915: fbdev helper alloc enter\n");
 	fb_helper = kzalloc(sizeof(*fb_helper), GFP_KERNEL);
 	if (!fb_helper)
 		return -ENOMEM;
+	os_console_print("i915: fbdev helper alloc done\n");
 	drm_fb_helper_prepare(dev, fb_helper, color_mode, NULL);
 
+	os_console_print("i915: drm client init enter\n");
 	ret = drm_client_init(dev, &fb_helper->client, "fbdev", &drm_fbdev_client_funcs);
 	if (ret) {
 		drm_err(dev, "Failed to register client: %d\n", ret);
 		goto err_drm_client_init;
 	}
+	os_console_print("i915: drm client init done\n");
 
+	os_console_print("i915: drm client register enter\n");
 	drm_client_register(&fb_helper->client);
+	os_console_print("i915: drm client register done\n");
 
 	return 0;
 

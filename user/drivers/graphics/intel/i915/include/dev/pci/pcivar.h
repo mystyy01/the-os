@@ -106,14 +106,36 @@ void os_print(const char *s);
 static inline int
 pci_find_device(struct pci_attach_args *pa, int (*match)(struct pci_attach_args *))
 {
-	struct pci_attach_args probe = {0};
+	int dev, func;
 
-	probe.pa_id = 0x8086u | (0x7A80u << 16);
-	probe.pa_class = (0x06u << 24) | (0x01u << 16);
+	for (dev = 0; dev < 32; dev++) {
+		int nfunc = 1;
 
-	if (match(&probe)) {
-		*pa = probe;
-		return 1;
+		for (func = 0; func < nfunc; func++) {
+			struct pci_attach_args probe = {0};
+			uint32_t id, hdr;
+
+			probe.pa_pc = 0;
+			probe.pa_tag = pci_make_tag(0, 0, dev, func);
+			id = pci_conf_read(probe.pa_pc, probe.pa_tag, 0x00);
+			if (id == 0xFFFFFFFFu || (id & 0xFFFFu) == 0xFFFFu)
+				break;
+
+			hdr = pci_conf_read(probe.pa_pc, probe.pa_tag, 0x0C);
+			if (func == 0 && (hdr & 0x00800000u))
+				nfunc = 8;
+
+			probe.pa_bus = 0;
+			probe.pa_device = dev;
+			probe.pa_function = func;
+			probe.pa_id = id;
+			probe.pa_class = pci_conf_read(probe.pa_pc, probe.pa_tag, 0x08);
+
+			if (match(&probe)) {
+				*pa = probe;
+				return 1;
+			}
+		}
 	}
 	return 0;
 }

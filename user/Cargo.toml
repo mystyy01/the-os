@@ -18,12 +18,14 @@ members = [
     "drivers/ata",
     "drivers/pci",
     "drivers/usb",
+    "drivers/ramdisk",
     "drivers/graphics/intel/i915",
     "shell",
     "services/echo",
     "services/echo_local",
     "bench",
     "threadtest",
+    "primitive-stress",
 ]
 
 [profile.dev]

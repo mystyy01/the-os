@@ -5,6 +5,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 static SERIAL_LOCK: AtomicBool = AtomicBool::new(false);
 static CRASH_MODE: AtomicBool = AtomicBool::new(false);
 
+const SERIAL_TX_TIMEOUT: u32 = 100_000_000;
+
 pub fn lock() {
     while SERIAL_LOCK.swap(true, Ordering::Acquire) {}
 }
@@ -60,9 +62,15 @@ pub fn write_byte(byte: u8) {
     } else {
         vga_putc(byte);
     }
-    if inb(0x3F8 + 5) & 0x20 != 0 {
-        outb(0x3F8, byte);
+    let mut spins: u32 = 0;
+    while inb(0x3F8 + 5) & 0x20 == 0 {
+        spins += 1;
+        if spins >= SERIAL_TX_TIMEOUT {
+            return;
+        }
+        core::hint::spin_loop();
     }
+    outb(0x3F8, byte);
 }
 
 pub fn begin_crash_output() -> bool {

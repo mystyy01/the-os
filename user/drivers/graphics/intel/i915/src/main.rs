@@ -2,11 +2,12 @@
 #![no_main]
 
 use libsys::{
-    OP_PCI_FIND, SVC_PCI, map_mmio, mbox_call, mbox_connect, print, print_hex,
-    spawn_thread, sys_sleep, sys_wakeup,
-    set_msi_waker,
+    OP_PCI_FIND, SVC_PCI, log, map_mmio, mbox_call, mbox_connect, print, print_hex,
+    set_msi_waker, spawn_thread, sys_sleep, sys_wakeup,
 };
 use compat_libc as _;
+
+const DRIVER_LOG_TO_SERIAL: bool = true;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn os_alloc_dma(pages: u64, phys_out: *mut u64) -> u64 {
@@ -28,6 +29,16 @@ pub extern "C" fn os_sleep(ident: u64, timeout_ns: u64) -> u64 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn os_sleep_prepare(ident: u64, timeout_ns: u64) -> u64 {
+    unsafe { libsys::syscall(32, ident, timeout_ns, 0, 0) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn os_sleep_commit(handle: u64) -> u64 {
+    unsafe { libsys::syscall(33, handle, 0, 0, 0) }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn os_wakeup(ident: u64) {
     sys_wakeup(ident);
 }
@@ -39,6 +50,24 @@ pub extern "C" fn os_msi_take() -> u64 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn os_print(s: *const u8) {
+    unsafe {
+        let mut len = 0usize;
+        while *s.add(len) != 0 {
+            len += 1;
+        }
+        let slice = core::slice::from_raw_parts(s, len);
+        if let Ok(text) = core::str::from_utf8(slice) {
+            if DRIVER_LOG_TO_SERIAL {
+                print(text);
+            } else {
+                log(text);
+            }
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn os_console_print(s: *const u8) {
     unsafe {
         let mut len = 0usize;
         while *s.add(len) != 0 {
@@ -87,8 +116,17 @@ unsafe extern "C" {
         depth: *mut u32,
         stride: *mut u32,
     ) -> i32;
-    fn i915_shim_draw_square(x: u32, y: u32, w: u32, h: u32, rgb: u32) -> i32;
+    fn i915_shim_bounce_ready() -> i32;
+    fn i915_shim_bounce_frame(
+        old_x: u32,
+        old_y: u32,
+        new_x: u32,
+        new_y: u32,
+        size: u32,
+        color: u32,
+    ) -> i32;
     fn i915_worker_thread_entry() -> !;
+    fn i915_irq_thread_entry() -> !;
     fn i915_shim_set_ram_pages(npages: u64);
 }
 
@@ -96,9 +134,91 @@ extern "C" fn worker_trampoline() -> ! {
     unsafe { i915_worker_thread_entry() }
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+extern "C" fn irq_trampoline() -> ! {
+    unsafe { i915_irq_thread_entry() }
+}
+
+extern "C" fn animation_trampoline() -> ! {
+    log("i915: GPU_BOUNCE thread entered\n");
+    while unsafe { i915_shim_bounce_ready() } == 0 {
+        sys_sleep(0x1915_424f_554e_4345, 10_000_000);
+    }
+    log("i915: GPU_BOUNCE thread saw ready\n");
+
+    let mut width = 0u32;
+    let mut height = 0u32;
+    let mut depth = 0u32;
+    let mut stride = 0u32;
+    let fb_ret = unsafe {
+        i915_shim_fb_info(&mut width, &mut height, &mut depth, &mut stride)
+    };
+    if fb_ret != 0 {
+        print("i915: GPU bounce framebuffer failed ret=");
+        print_hex(fb_ret as u32);
+        print("\n");
+        loop {}
+    }
+    log("i915: GPU_BOUNCE framebuffer ready\n");
+
+    let size = 128u32;
+    let mut x = 32u32;
+    let mut y = 32u32;
+    let mut dx = 7i32;
+    let mut dy = 5i32;
+    let mut frame = 0u32;
+    loop {
+        let old_x = x;
+        let old_y = y;
+        let next_x = x as i32 + dx;
+        let next_y = y as i32 + dy;
+
+        if next_x <= 0 || next_x + size as i32 >= width as i32 {
+            dx = -dx;
+        }
+        if next_y <= 0 || next_y + size as i32 >= height as i32 {
+            dy = -dy;
+        }
+
+        x = (x as i32 + dx) as u32;
+        y = (y as i32 + dy) as u32;
+        let color = match (frame / 180) % 3 {
+            0 => 0x0000d8ff,
+            1 => 0x00ff3b80,
+            _ => 0x0099ff55,
+        };
+        if frame == 0 {
+            log("i915: GPU_BOUNCE first frame enter\n");
+        }
+        let ret = unsafe {
+            i915_shim_bounce_frame(old_x, old_y, x, y, size, color)
+        };
+        if frame == 0 {
+            log("i915: GPU_BOUNCE first frame returned\n");
+        }
+        if ret != 0 {
+            print("i915: GPU bounce frame failed ret=");
+            print_hex(ret as u32);
+            print("\n");
+            loop {}
+        }
+        frame = frame.wrapping_add(1);
+        sys_sleep(0x1915_424f_554e_4345, 16_666_667);
+    }
+}
+
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     spawn_thread(worker_trampoline, 3, 1);
+    if spawn_thread(irq_trampoline, 3, 1) < 0 {
+        log("i915: IRQ thread spawn failed\n");
+    }
+    let animation_pid = spawn_thread(animation_trampoline, 3, 1);
+    if animation_pid < 0 {
+        log("i915: GPU_BOUNCE thread spawn failed\n");
+    } else {
+        log("i915: GPU_BOUNCE thread spawned\n");
+    }
     set_msi_waker(0x1915000000000001);
 
     unsafe {
@@ -140,48 +260,7 @@ unsafe extern "C" fn _start() -> ! {
     }
     print("i915: probe returned, attach path ran\n");
 
-    let mut width: u32 = 0;
-    let mut height: u32 = 0;
-    let mut depth: u32 = 0;
-    let mut stride: u32 = 0;
-    let fb_ret = unsafe {
-        i915_shim_fb_info(&mut width, &mut height, &mut depth, &mut stride)
-    };
-
-    if fb_ret != 0 {
-        print("i915: no framebuffer (ri_bits is NULL) - fb_ret=");
-        print_hex(fb_ret as u32);
-        print("\n");
-        loop {}
-    }
-
-    print("i915: fb width=");
-    print_hex(width);
-    print(" height=");
-    print_hex(height);
-    print(" depth=");
-    print_hex(depth);
-    print(" stride=");
-    print_hex(stride);
-    print("\n");
-
-    print("i915: filling framebuffer (color cycle)\n");
-
-    let mut c: u32 = 0;
     loop {
-        let color = match c % 3 {
-            0 => 0x00FF0000u32,
-            1 => 0x0000FF00u32,
-            _ => 0x000000FFu32,
-        };
-        unsafe {
-            i915_shim_draw_square(0, 0, width, height, color);
-        }
-        c = c.wrapping_add(1);
-        let mut d: u64 = 0;
-        while d < 80_000_000 {
-            core::hint::spin_loop();
-            d += 1;
-        }
+        sys_sleep(0x1915_4d41_494e_0001, 1_000_000_000);
     }
 }

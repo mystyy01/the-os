@@ -37,6 +37,8 @@
 #include "intel_uncore.h"
 #include "shmem_utils.h"
 
+int i915_shim_gpu_exec_test(struct intel_gt *);
+
 void intel_gt_common_init_early(struct intel_gt *gt)
 {
 	mtx_init(gt->irq_lock, IPL_TTY);
@@ -736,17 +738,19 @@ int intel_gt_init(struct intel_gt *gt)
 	if (err)
 		gt_err(gt, "Failed to retrieve hwconfig table: %pe\n", ERR_PTR(err));
 
-#ifdef I915_SHIM_DISPLAY_ONLY
-	gt_notice(gt, "Skipping engine default capture for display bring-up\n");
-#else
 	err = __engines_record_defaults(gt);
 	if (err)
 		goto err_gt;
-#endif
 
 	err = __engines_verify_workarounds(gt);
 	if (err)
 		goto err_gt;
+
+#ifdef I915_SHIM_DISPLAY_ONLY
+	err = i915_shim_gpu_exec_test(gt);
+	if (err)
+		goto err_gt;
+#endif
 
 	err = i915_inject_probe_error(gt->i915, -EIO);
 	if (err)

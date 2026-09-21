@@ -216,6 +216,9 @@ __maybe_unused static void _param_nop(void *valp)
 void intel_display_params_copy(struct intel_display_params *dest)
 {
 	*dest = intel_display_modparams;
+#ifdef I915_SHIM_DISPLAY_ONLY
+	dest->enable_fbc = 0;
+#endif
 #define DUP(T, x, ...) _param_dup(&dest->x);
 	INTEL_DISPLAY_PARAMS_FOR_EACH(DUP);
 #undef DUP

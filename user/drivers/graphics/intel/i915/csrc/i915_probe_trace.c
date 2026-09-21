@@ -7,13 +7,14 @@
 #include "i915_request.h"
 
 extern void os_print(const char *s);
+extern void os_console_print(const char *s);
 
 static struct intel_guc_ct *trace_ct;
 
 static void
 trace_enter(const char *name)
 {
-	os_print(name);
+	os_console_print(name);
 }
 
 static void
@@ -56,7 +57,7 @@ trace_ret(const char *name, int ret)
 		buf[i++] = 'm';
 	}
 	buf[i] = 0;
-	os_print(buf);
+	os_console_print(buf);
 }
 
 static void
@@ -75,7 +76,7 @@ trace_ptr(const char *name, uint64_t v)
 		buf[i++] = nib < 10 ? '0' + nib : 'a' + (nib - 10);
 	}
 	buf[i] = 0;
-	os_print(buf);
+	os_console_print(buf);
 }
 
 static uint32_t
@@ -124,9 +125,11 @@ __wrap_intel_guc_ct_send(struct intel_guc_ct *ct, const u32 *action, u32 len,
     u32 *response_buf, u32 response_buf_size, u32 flags)
 {
 	int ret;
+	int log_action = action[0] != 0x1000 && action[0] != 0x1001;
 
 	trace_ct = ct;
-	trace_ptr("i915: CT action=", action[0]);
+	if (log_action)
+		trace_ptr("i915: CT action=", action[0]);
 	if (action[0] == 0x550a) {
 		trace_ptr("i915: CT 550a send head=", ct->ctbs.send.desc->head);
 		trace_ptr("i915: CT 550a send tail=", ct->ctbs.send.desc->tail);
@@ -135,7 +138,8 @@ __wrap_intel_guc_ct_send(struct intel_guc_ct *ct, const u32 *action, u32 len,
 	}
 	ret = __real_intel_guc_ct_send(ct, action, len, response_buf,
 	    response_buf_size, flags);
-	trace_ret("i915: CT ret", ret);
+	if (log_action)
+		trace_ret("i915: CT ret", ret);
 	if (action[0] == 0x550a) {
 		trace_ret("i915: CT 550a ret", ret);
 		trace_ptr("i915: CT 550a send head=", ct->ctbs.send.desc->head);
@@ -149,8 +153,13 @@ __wrap_intel_guc_ct_send(struct intel_guc_ct *ct, const u32 *action, u32 len,
 void
 i915_trace_ct_after_irq(uint64_t count)
 {
+	static int logged;
+
 	if (!trace_ct)
 		return;
+	if (logged)
+		return;
+	logged = 1;
 	trace_ptr("i915: MSI count=", count);
 	trace_ptr("i915: CT send head=", trace_ct->ctbs.send.desc->head);
 	trace_ptr("i915: CT send tail=", trace_ct->ctbs.send.desc->tail);
@@ -506,20 +515,6 @@ __wrap_____i915_gem_object_get_pages(void *obj)
 		os_print("\x1b[0m");
 	}
 	return r;
-}
-
-void __real_i915_request_add(void *rq);
-void
-__wrap_i915_request_add(void *rq)
-{
-	struct i915_request *request = rq;
-
-	trace_ptr("trace: req_add rq=", (uint64_t)(uintptr_t)rq);
-	trace_ptr("trace: req engine=", request->engine->id);
-	trace_ptr("trace: req seqno=", request->fence.seqno);
-	trace_ptr("trace: req hwsp=", *request->hwsp_seqno);
-	__real_i915_request_add(rq);
-	trace_enter("trace: req_add done\n");
 }
 
 int __real_intel_gt_wait_for_idle(void *gt, long timeout);

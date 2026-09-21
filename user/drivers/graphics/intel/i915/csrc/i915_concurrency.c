@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/timeout.h>
 
 
 extern uint64_t os_sleep(uint64_t ident, uint64_t timeout_ns);
@@ -9,7 +10,8 @@ extern void i915_refresh_jiffies(void);
 extern uint64_t i915_irq_dispatch(void);
 extern void i915_trace_ct_after_irq(uint64_t count);
 
-#define I915_WORKER_IDENT 0x1915000000000001ULL
+#define I915_IRQ_IDENT 0x1915000000000001ULL
+#define I915_WORKER_IDENT 0x1915000000000002ULL
 #define I915_TICK_NS 10000000ULL
 
 #define MAX_TIMEOUTS 64
@@ -96,13 +98,6 @@ i915_worker_thread_entry(void)
 	for (;;) {
 		int did_work;
 
-		i915_refresh_jiffies();
-		{
-			uint64_t irq_count = i915_irq_dispatch();
-			if (irq_count)
-				i915_trace_ct_after_irq(irq_count);
-		}
-
 		do {
 			did_work = 0;
 			uint64_t now = os_now_ns();
@@ -111,7 +106,9 @@ i915_worker_thread_entry(void)
 				if (g_timeouts[i].active && now >= g_timeouts[i].deadline_ns) {
 					void (*f)(void *) = g_timeouts[i].func;
 					void *a = g_timeouts[i].arg;
+					struct timeout *owner = g_timeouts[i].owner;
 					g_timeouts[i].active = 0;
+					__atomic_store_n(&owner->to_pending, 0, __ATOMIC_RELEASE);
 					f(a);
 					did_work = 1;
 				}
@@ -146,5 +143,20 @@ i915_worker_thread_entry(void)
 		} else {
 			os_sleep(I915_WORKER_IDENT, I915_TICK_NS);
 		}
+	}
+}
+
+void __attribute__((noreturn))
+i915_irq_thread_entry(void)
+{
+	for (;;) {
+		uint64_t irq_count;
+
+		i915_refresh_jiffies();
+		irq_count = i915_irq_dispatch();
+		if (irq_count)
+			i915_trace_ct_after_irq(irq_count);
+
+		os_sleep(I915_IRQ_IDENT, I915_TICK_NS);
 	}
 }

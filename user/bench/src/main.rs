@@ -184,8 +184,9 @@ fn cold(idx: usize, label: &str) {
     print("\n");
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     print("bench: up\n");
     floor();
 

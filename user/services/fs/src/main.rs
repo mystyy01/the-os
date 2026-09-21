@@ -293,8 +293,9 @@ fn detect_partition() -> (u64, u64) {
     (0, 131072)
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     let ata = loop {
         let r = vfs_resolve("/dev/ata0".as_bytes());
         if r != 0 {

@@ -1,7 +1,7 @@
 use core::sync::atomic::{Ordering, fence};
 
 use crate::{
-    ipc::{ARENA_PHYS, BUFPOOL_OFF, MBOX_OFF, MBOX_REQ, Mailbox, OP_IRQ},
+    ipc::{ARENA_PHYS, BUFPOOL_OFF, IRQ_MBOX_BASE, MBOX_OFF, MBOX_REQ, Mailbox, OP_IRQ},
     vmm,
 };
 
@@ -12,7 +12,7 @@ pub fn register(irq: usize, service_id: u32) {
         unsafe {
             IRQ_HANDLERS[irq] = service_id as i32;
         }
-        crate::ipc::inbox_add(service_id, (48 + irq) as u32);
+        crate::ipc::inbox_add(service_id, (IRQ_MBOX_BASE + irq) as u32);
     }
 }
 
@@ -31,7 +31,7 @@ pub fn dispatch(irq: usize) {
             crate::ipc::irq_ring_push(irq, sc);
         }
 
-        let idx = 48 + irq;
+        let idx = IRQ_MBOX_BASE + irq;
         let mbox_phys = ARENA_PHYS + MBOX_OFF as u64 + (idx * 64) as u64;
         let buf_phys = ARENA_PHYS + BUFPOOL_OFF as u64 + (idx * 4096) as u64;
         let mbox = vmm::phys_to_virt(mbox_phys) as *mut Mailbox;

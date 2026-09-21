@@ -79,8 +79,9 @@ fn on_resolve(req: &[u8], reply: &mut [u8]) -> usize {
     reply[..4].copy_from_slice(&r.to_le_bytes());
     4
 }
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _start() -> ! {
+libsys::entry!(main);
+
+unsafe extern "C" fn main() -> ! {
     register(OP_BIND, on_bind);
     register(OP_RESOLVE, on_resolve);
     serve(SVC_VFS);

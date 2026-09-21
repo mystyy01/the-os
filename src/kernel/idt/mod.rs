@@ -114,7 +114,6 @@ extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
             let rip = *frame.add(17);
             let rsp = *frame.add(20);
 
-            crate::klog::dump_once();
             crate::serial::write_str("\nRING3 CRASH\npid=");
             crate::serial::write_hex((*curr_task).pid as u64);
             crate::serial::write_str(" vector=");
@@ -129,14 +128,32 @@ extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
             crate::serial::write_hex(rsp);
             crate::serial::write_str("\n");
 
-            let ra = *(rsp as *const u64);
-            crate::serial::write_str("ra=");
-            crate::serial::write_hex(ra);
-            crate::serial::write_str("\n");
+            let task_cr3 = (*curr_task).cr3;
+            let fault_addr: u64;
+            core::arch::asm!("mov {}, cr2", out(reg) fault_addr);
+
+            if vector == 14 {
+                crate::serial::write_str("cr2=");
+                crate::serial::write_hex(fault_addr);
+                crate::serial::write_str("\n");
+            }
+
+            if crate::vmm::is_mapped(task_cr3, rsp) {
+                let ra = *(rsp as *const u64);
+                crate::serial::write_str("ra=");
+                crate::serial::write_hex(ra);
+                crate::serial::write_str("\n");
+            } else {
+                crate::serial::write_str("ra=<rsp unmapped>\n");
+            }
 
             crate::serial::write_str("stack code candidates:");
             for i in 0..32 {
-                let candidate = *((rsp as *const u64).add(i));
+                let slot = (rsp as *const u64).add(i) as u64;
+                if !crate::vmm::is_mapped(task_cr3, slot) {
+                    break;
+                }
+                let candidate = *(slot as *const u64);
                 if (0x400000..0x700000).contains(&candidate) {
                     crate::serial::write_str(" ");
                     crate::serial::write_hex(candidate);
@@ -145,12 +162,7 @@ extern "C" fn exception_handler(vector: u64, error_code: u64, frame: *mut u64) {
             crate::serial::write_str("\n");
 
             if vector == 14 {
-                let cr2: u64;
-                core::arch::asm!("mov {}, cr2", out(reg) cr2);
-                crate::serial::write_str("cr2=");
-                crate::serial::write_hex(cr2);
-                crate::serial::write_str("\n");
-
+                let cr2 = fault_addr;
                 crate::klog::snapshot_crash(
                     error_code,
                     cr2,

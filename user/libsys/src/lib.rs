@@ -3,11 +3,11 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
 const ARENA: u64 = 0x5000_0000;
-const MAX_MAILBOXES: usize = 64;
+const MAX_MAILBOXES: usize = 145;
 const MBOX_OFF: usize = 4096;
 const BUFPOOL_OFF: usize = 0x10000;
 const BUF_SIZE: usize = 4096;
-const IRQRING_OFF: usize = 0x50000;
+const IRQRING_OFF: usize = 0xA2000;
 const IRQRING_CAP: usize = 256;
 
 #[repr(C)]
@@ -36,7 +36,7 @@ pub fn irq_pop(irq: usize) -> Option<u8> {
     Some(b)
 }
 
-const ULOG_OFF: usize = 0x57000;
+const ULOG_OFF: usize = 0xA6000;
 const ULOG_CAP: u32 = 0x8000;
 
 #[repr(C)]
@@ -172,6 +172,7 @@ const EMPTY_FD: FD = FD {
     used: false,
 };
 static mut FD_TABLE: [FD; 256] = [EMPTY_FD; 256];
+static FD_LOCK: AtomicU32 = AtomicU32::new(0);
 
 pub const OP_BIND: u8 = 1;
 pub const OP_RESOLVE: u8 = 2;
@@ -187,7 +188,7 @@ pub const OP_CLOSE: u8 = 10;
 pub const OP_BWRITE: u8 = 11;
 pub const OP_SYNC: u8 = 12;
 
-pub const PP_BASE: u64 = ARENA + 0x60000;
+pub const PP_BASE: u64 = ARENA + 0xB0000;
 pub const PP_WARMUP: u64 = 256;
 pub const PP_ITERS: u64 = 10_000;
 
@@ -227,7 +228,7 @@ fn arena_buf(off: u32) -> &'static mut [u8] {
     unsafe { core::slice::from_raw_parts_mut((ARENA + off as u64) as *mut u8, BUF_SIZE) }
 }
 
-const INBOX_OFF: usize = 0x55000;
+const INBOX_OFF: usize = 0xA4000;
 const MAX_SERVICES: usize = 16;
 const INBOX_CAP: usize = 48;
 
@@ -252,7 +253,7 @@ fn inbox_count(svc: u32) -> &'static AtomicU32 {
     unsafe { &*(base as *const AtomicU32) }
 }
 
-const SRVSTATE_OFF: usize = 0x56000;
+const SRVSTATE_OFF: usize = 0xA5000;
 const SRV_SPINNING: u32 = 0;
 const SRV_BLOCKED: u32 = 1;
 const SRV_CORE_UNKNOWN: u32 = 0xFFFF_FFFF;
@@ -304,6 +305,12 @@ pub fn total_ram_pages() -> u64 {
     unsafe { syscall(28, 0, 0, 0, 0) }
 }
 
+pub fn module_info(idx: u64) -> (u64, u64) {
+    let mut len: u64 = 0;
+    let phys = unsafe { syscall(34, idx, &mut len as *mut u64 as u64, 0, 0) };
+    (phys, len)
+}
+
 pub fn handoff_to_service(svc: u32) -> u64 {
     unsafe { syscall(19, svc as u64, 0, 0, 0) }
 }
@@ -321,11 +328,35 @@ fn notify_if_blocked(svc: u32) {
     }
 }
 
-const MAX_USER_MAILBOXES: usize = 47;
+const MAX_USER_MAILBOXES: usize = 128;
 
 static mut SERVICE_CONN: [i32; MAX_SERVICES] = [-1i32; MAX_SERVICES];
+static CONN_LOCK: AtomicU32 = AtomicU32::new(0);
+static MBOX_LOCKS: [AtomicU32; MAX_USER_MAILBOXES] =
+    [const { AtomicU32::new(0) }; MAX_USER_MAILBOXES];
+
+struct LockGuard(&'static AtomicU32);
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        self.0.store(0, Ordering::Release);
+    }
+}
+
+fn lock(value: &'static AtomicU32) -> LockGuard {
+    while value
+        .compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        unsafe {
+            syscall(9, 0, 0, 0, 0);
+        }
+    }
+    LockGuard(value)
+}
 
 pub fn mbox_connect(service_id: u32) -> usize {
+    let _guard = lock(&CONN_LOCK);
     unsafe {
         if (service_id as usize) < MAX_SERVICES && SERVICE_CONN[service_id as usize] >= 0 {
             return SERVICE_CONN[service_id as usize] as usize;
@@ -333,11 +364,8 @@ pub fn mbox_connect(service_id: u32) -> usize {
     }
 
     let raw = alloc_next().fetch_add(1, Ordering::Relaxed) as usize;
-    let idx = if raw >= MAX_USER_MAILBOXES {
-        MAX_USER_MAILBOXES - 1
-    } else {
-        raw
-    };
+    assert!(raw < MAX_USER_MAILBOXES, "mailbox pool exhausted");
+    let idx = raw;
     let mb = &mut mailboxes()[idx];
     mb.client_id = get_self_pid() as u32;
     mb.service_id = service_id;
@@ -376,6 +404,8 @@ pub fn notify(service_id: u32) {
 }
 
 pub fn mbox_call(idx: usize, data: &[u8], out: &mut [u8]) -> usize {
+    assert!(data.len() <= BUF_SIZE);
+    let _guard = lock(&MBOX_LOCKS[idx]);
     let mb = &mut mailboxes()[idx];
     let buf = arena_buf(mb.msg_offset);
     buf[..data.len()].copy_from_slice(data);
@@ -402,7 +432,8 @@ pub fn mbox_call(idx: usize, data: &[u8], out: &mut [u8]) -> usize {
         }
     }
     core::sync::atomic::fence(Ordering::Acquire);
-    let n = mb.len as usize;
+    let n = core::cmp::min(mb.len as usize, out.len());
+    let n = core::cmp::min(n, BUF_SIZE);
     let buf = arena_buf(mb.msg_offset);
     out[..n].copy_from_slice(&buf[..n]);
     mb.status = EMPTY;
@@ -410,6 +441,8 @@ pub fn mbox_call(idx: usize, data: &[u8], out: &mut [u8]) -> usize {
 }
 
 pub fn mbox_call_spin(idx: usize, data: &[u8], out: &mut [u8]) -> usize {
+    assert!(data.len() <= BUF_SIZE);
+    let _guard = lock(&MBOX_LOCKS[idx]);
     let mb = &mut mailboxes()[idx];
     let buf = arena_buf(mb.msg_offset);
     buf[..data.len()].copy_from_slice(data);
@@ -423,7 +456,8 @@ pub fn mbox_call_spin(idx: usize, data: &[u8], out: &mut [u8]) -> usize {
         core::hint::spin_loop();
     }
     core::sync::atomic::fence(Ordering::Acquire);
-    let n = mb.len as usize;
+    let n = core::cmp::min(mb.len as usize, out.len());
+    let n = core::cmp::min(n, BUF_SIZE);
     let buf = arena_buf(mb.msg_offset);
     out[..n].copy_from_slice(&buf[..n]);
     mb.status = EMPTY;
@@ -431,6 +465,8 @@ pub fn mbox_call_spin(idx: usize, data: &[u8], out: &mut [u8]) -> usize {
 }
 
 pub fn mbox_call_prof(idx: usize, data: &[u8], out: &mut [u8]) -> (u64, u64) {
+    assert!(data.len() <= BUF_SIZE);
+    let _guard = lock(&MBOX_LOCKS[idx]);
     let mb = &mut mailboxes()[idx];
     let buf = arena_buf(mb.msg_offset);
     buf[..data.len()].copy_from_slice(data);
@@ -446,7 +482,8 @@ pub fn mbox_call_prof(idx: usize, data: &[u8], out: &mut [u8]) -> (u64, u64) {
     }
     let t4 = rdtsc();
     core::sync::atomic::fence(Ordering::Acquire);
-    let n = mb.len as usize;
+    let n = core::cmp::min(mb.len as usize, out.len());
+    let n = core::cmp::min(n, BUF_SIZE);
     let buf = arena_buf(mb.msg_offset);
     out[..n].copy_from_slice(&buf[..n]);
     mb.status = EMPTY;
@@ -487,7 +524,7 @@ fn serve_scan(my_service: u32, count: &AtomicU32) -> (bool, bool) {
         if unsafe { core::ptr::read_volatile(&mb.status) } == REQ && mb.service_id == my_service {
             found = true;
             core::sync::atomic::fence(Ordering::Acquire);
-            let n = mb.len as usize;
+            let n = core::cmp::min(mb.len as usize, BUF_SIZE);
             let off = mb.msg_offset;
             let mut reply = [0u8; BUF_SIZE];
             let req_op = arena_buf(off)[0];
@@ -498,6 +535,7 @@ fn serve_scan(my_service: u32, count: &AtomicU32) -> (bool, bool) {
                     0
                 }
             };
+            let rn = core::cmp::min(rn, BUF_SIZE);
             let buf = arena_buf(off);
             buf[..rn].copy_from_slice(&reply[..rn]);
             mb.len = rn as u32;
@@ -589,11 +627,19 @@ pub unsafe fn inl(port: u16) -> u32 {
     return v;
 }
 
-pub fn print(s: &str) {
+fn output(s: &str, console: bool) {
     unsafe {
-        syscall(8, s.as_ptr() as u64, s.len() as u64, 0, 0);
+        syscall(8, s.as_ptr() as u64, s.len() as u64, console as u64, 0);
     }
     ulog_append(s.as_bytes());
+}
+
+pub fn print(s: &str) {
+    output(s, true);
+}
+
+pub fn log(s: &str) {
+    output(s, false);
 }
 
 pub fn print_hex(mut n: u32) {
@@ -618,8 +664,40 @@ pub fn spawn(bytes: &[u8], cpu_id: u8) -> i32 {
     }
 }
 
+#[unsafe(naked)]
+unsafe extern "C" fn thread_start() -> ! {
+    core::arch::naked_asm!("xor ebp, ebp", "and rsp, -16", "call rdi", "ud2")
+}
+
 pub fn spawn_thread(entry: extern "C" fn() -> !, stack_order: u64, priority: u64) -> i32 {
-    unsafe { syscall(25, entry as u64, stack_order, priority, 0) as i32 }
+    unsafe {
+        syscall(
+            25,
+            thread_start as *const () as u64,
+            stack_order,
+            priority,
+            entry as u64,
+        ) as i32
+    }
+}
+
+#[macro_export]
+macro_rules! entry {
+    ($main:path) => {
+        const _: unsafe extern "C" fn() -> ! = $main;
+
+        #[unsafe(naked)]
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn _start() -> ! {
+            core::arch::naked_asm!(
+                "xor ebp, ebp",
+                "and rsp, -16",
+                "call {main}",
+                "ud2",
+                main = sym $main,
+            )
+        }
+    };
 }
 
 pub const SLEEP_WOKEN: u64 = 0;
@@ -677,6 +755,7 @@ fn open_mode(path: &[u8], flags: u8) -> i32 {
     if handle < 0 {
         return -1;
     }
+    let _guard = lock(&FD_LOCK);
     unsafe {
         for fd in 0..256 {
             if !FD_TABLE[fd].used {
@@ -705,68 +784,80 @@ pub fn create_trunc(path: &[u8]) -> i32 {
 }
 
 pub fn close(fd: i32) {
-    unsafe {
-        if fd < 0 || fd as usize >= 256 || !FD_TABLE[fd as usize].used {
-            return;
-        }
-        let conn = FD_TABLE[fd as usize].conn;
-        let handle = FD_TABLE[fd as usize].handle;
-        let mut req = [0u8; 5];
-        req[0] = OP_CLOSE;
-        req[1..5].copy_from_slice(&handle.to_le_bytes());
-        let mut out = [0u8; 4];
-        mbox_call(conn, &req, &mut out);
-        FD_TABLE[fd as usize] = EMPTY_FD;
-    }
-}
-pub fn read(fd: i32, buf: &mut [u8]) -> i32 {
-    unsafe {
-        if fd < 0 || fd as usize >= 256 || !FD_TABLE[fd as usize].used {
-            return -1;
-        }
-        let conn = FD_TABLE[fd as usize].conn;
-        let handle = FD_TABLE[fd as usize].handle;
-        let mut total = 0usize;
-        while total < buf.len() {
-            let chunk_len = core::cmp::min(buf.len() - total, BUF_SIZE);
-            let mut req = [0u8; 9];
-            req[0] = OP_READ;
-            req[1..5].copy_from_slice(&handle.to_le_bytes());
-            req[5..9].copy_from_slice(&(chunk_len as u32).to_le_bytes());
-            let n = mbox_call(conn, &req, &mut buf[total..total + chunk_len]);
-            if n == 0 {
-                break;
+    let entry = {
+        let _guard = lock(&FD_LOCK);
+        unsafe {
+            if fd < 0 || fd as usize >= 256 || !FD_TABLE[fd as usize].used {
+                return;
             }
-            total += n;
+            let entry = FD_TABLE[fd as usize];
+            FD_TABLE[fd as usize] = EMPTY_FD;
+            entry
         }
-        total as i32
+    };
+    let mut req = [0u8; 5];
+    req[0] = OP_CLOSE;
+    req[1..5].copy_from_slice(&entry.handle.to_le_bytes());
+    let mut out = [0u8; 4];
+    mbox_call(entry.conn, &req, &mut out);
+}
+
+fn fd_entry(fd: i32) -> Option<FD> {
+    let _guard = lock(&FD_LOCK);
+    unsafe {
+        if fd < 0 || fd as usize >= 256 || !FD_TABLE[fd as usize].used {
+            return None;
+        }
+        Some(FD_TABLE[fd as usize])
     }
 }
 
-pub fn write(fd: i32, buf: &[u8]) -> i32 {
-    unsafe {
-        if fd < 0 || fd as usize >= 256 || !FD_TABLE[fd as usize].used {
-            return -1;
+pub fn read(fd: i32, buf: &mut [u8]) -> i32 {
+    let entry = match fd_entry(fd) {
+        Some(entry) => entry,
+        None => return -1,
+    };
+    let mut total = 0usize;
+    while total < buf.len() {
+        let chunk_len = core::cmp::min(buf.len() - total, BUF_SIZE);
+        let mut req = [0u8; 9];
+        req[0] = OP_READ;
+        req[1..5].copy_from_slice(&entry.handle.to_le_bytes());
+        req[5..9].copy_from_slice(&(chunk_len as u32).to_le_bytes());
+        let n = mbox_call(
+            entry.conn,
+            &req,
+            &mut buf[total..total + chunk_len],
+        );
+        if n == 0 {
+            break;
         }
-        let conn = FD_TABLE[fd as usize].conn;
-        let handle = FD_TABLE[fd as usize].handle;
-        let mut total = 0usize;
-        while total < buf.len() {
-            let chunk = core::cmp::min(buf.len() - total, BUF_SIZE - 5);
-            let mut req = [0u8; BUF_SIZE];
-            req[0] = OP_WRITE;
-            req[1..5].copy_from_slice(&handle.to_le_bytes());
-            req[5..5 + chunk].copy_from_slice(&buf[total..total + chunk]);
-            let mut out = [0u8; 4];
-            mbox_call(conn, &req[..5 + chunk], &mut out);
-            let n = i32::from_le_bytes([out[0], out[1], out[2], out[3]]);
-            if n <= 0 {
-                break;
-            }
-            total += n as usize;
-        }
-        total as i32
+        total += n;
     }
+    total as i32
+}
+
+pub fn write(fd: i32, buf: &[u8]) -> i32 {
+    let entry = match fd_entry(fd) {
+        Some(entry) => entry,
+        None => return -1,
+    };
+    let mut total = 0usize;
+    while total < buf.len() {
+        let chunk = core::cmp::min(buf.len() - total, BUF_SIZE - 5);
+        let mut req = [0u8; BUF_SIZE];
+        req[0] = OP_WRITE;
+        req[1..5].copy_from_slice(&entry.handle.to_le_bytes());
+        req[5..5 + chunk].copy_from_slice(&buf[total..total + chunk]);
+        let mut out = [0u8; 4];
+        mbox_call(entry.conn, &req[..5 + chunk], &mut out);
+        let n = i32::from_le_bytes([out[0], out[1], out[2], out[3]]);
+        if n <= 0 {
+            break;
+        }
+        total += n as usize;
+    }
+    total as i32
 }
 
 pub fn get_self_pid() -> i32 {
